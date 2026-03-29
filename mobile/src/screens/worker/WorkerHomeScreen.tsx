@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { View, Text, StyleSheet, Switch, Dimensions, Modal } from 'react-native';
+import { View, Text, StyleSheet, Switch, Dimensions, Modal, TouchableOpacity } from 'react-native';
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { supabase } from '../../lib/supabase';
@@ -180,7 +180,22 @@ export default function WorkerHomeScreen({ navigation }: any) {
             title={e.title}
           />
         ))}
+        {isOnline && location && (
+          <Marker
+            coordinate={{ latitude: location.coords.latitude, longitude: location.coords.longitude }}
+            pinColor="#1a472a"
+            title="You are here"
+          />
+        )}
       </MapView>
+
+      {isOnline && (
+        <View style={styles.jobCountBadge}>
+          <Text style={styles.jobCountBadgeText}>
+            {reports.length + errands.length} Jobs Available
+          </Text>
+        </View>
+      )}
 
       {/* Online/Offline Toggle */}
       <View style={[styles.toggleBar, isOnline ? styles.toggleOnline : styles.toggleOffline]}>
@@ -222,6 +237,13 @@ export default function WorkerHomeScreen({ navigation }: any) {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   map: { width: Dimensions.get('window').width, height: Dimensions.get('window').height },
+  jobCountBadge: {
+    position: 'absolute', top: 140, alignSelf: 'center',
+    backgroundColor: '#e67e22', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 8,
+    elevation: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15, shadowRadius: 4,
+  },
+  jobCountBadgeText: { color: '#fff', fontSize: 14, fontWeight: '700' },
   toggleBar: {
     position: 'absolute', top: 60, left: 16, right: 16,
     borderRadius: 16, padding: 16, flexDirection: 'row',

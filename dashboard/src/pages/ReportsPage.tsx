@@ -23,6 +23,9 @@ const ReportsPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [selectedReport, setSelectedReport] = useState<Report | null>(null);
   const [showModal, setShowModal] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<string>('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
 
   useEffect(() => {
     fetchReports();
@@ -95,9 +98,19 @@ const ReportsPage: React.FC = () => {
     }
   };
 
+  const filteredReports = statusFilter
+    ? reports.filter((r) => r.status === statusFilter)
+    : reports;
+
+  const totalPages = Math.ceil(filteredReports.length / itemsPerPage);
+  const paginatedReports = filteredReports.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
+
   const exportToCSV = () => {
     const headers = ['Date', 'Category', 'Address', 'Status', 'Bounty', 'Notes'];
-    const rows = reports.map((r) => [
+    const rows = filteredReports.map((r) => [
       new Date(r.created_at).toLocaleDateString(),
       r.category,
       r.address,
@@ -124,28 +137,48 @@ const ReportsPage: React.FC = () => {
     <div style={styles.container}>
       <div style={styles.header}>
         <h1 style={styles.title}>Reports</h1>
-        <button onClick={exportToCSV} style={styles.exportButton}>
-          Export to CSV
-        </button>
+        <div style={styles.headerActions}>
+          <select
+            value={statusFilter}
+            onChange={(e) => {
+              setStatusFilter(e.target.value);
+              setCurrentPage(1);
+            }}
+            style={styles.filterSelect}
+          >
+            <option value="">All Statuses</option>
+            <option value="submitted">Submitted</option>
+            <option value="verified">Verified</option>
+            <option value="rejected">Rejected</option>
+          </select>
+          <button onClick={exportToCSV} style={styles.exportButton}>
+            Export to CSV
+          </button>
+        </div>
       </div>
 
       {loading ? (
         <div style={styles.loading}>Loading...</div>
+      ) : paginatedReports.length === 0 ? (
+        <div style={styles.emptyState}>
+          <p>No reports found</p>
+        </div>
       ) : (
-        <div style={styles.tableWrapper}>
-          <table style={styles.table}>
-            <thead>
-              <tr style={styles.headerRow}>
-                <th style={styles.th}>Date</th>
-                <th style={styles.th}>Category</th>
-                <th style={styles.th}>Address</th>
-                <th style={styles.th}>Status</th>
-                <th style={styles.th}>Bounty</th>
-                <th style={styles.th}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {reports.map((report) => (
+        <>
+          <div style={styles.tableWrapper}>
+            <table style={styles.table}>
+              <thead>
+                <tr style={styles.headerRow}>
+                  <th style={styles.th}>Date</th>
+                  <th style={styles.th}>Category</th>
+                  <th style={styles.th}>Address</th>
+                  <th style={styles.th}>Status</th>
+                  <th style={styles.th}>Bounty</th>
+                  <th style={styles.th}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {paginatedReports.map((report) => (
                 <tr
                   key={report.id}
                   style={styles.row}
@@ -172,7 +205,28 @@ const ReportsPage: React.FC = () => {
               ))}
             </tbody>
           </table>
+
+          <div style={styles.pagination}>
+            <button
+              onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+              disabled={currentPage === 1}
+              style={styles.paginationButton}
+            >
+              Previous
+            </button>
+            <span style={styles.pageInfo}>
+              Page {currentPage} of {totalPages}
+            </span>
+            <button
+              onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+              disabled={currentPage === totalPages}
+              style={styles.paginationButton}
+            >
+              Next
+            </button>
+          </div>
         </div>
+        </>
       )}
 
       {showModal && selectedReport && (
@@ -277,6 +331,21 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: '30px',
+    flexWrap: 'wrap',
+    gap: '16px',
+  },
+  headerActions: {
+    display: 'flex',
+    gap: '12px',
+    alignItems: 'center',
+  },
+  filterSelect: {
+    padding: '10px 12px',
+    border: '1px solid #ddd',
+    borderRadius: '4px',
+    fontSize: '14px',
+    backgroundColor: 'white',
+    cursor: 'pointer',
   },
   title: {
     margin: 0,
@@ -430,6 +499,38 @@ const styles: Record<string, React.CSSProperties> = {
     textAlign: 'center',
     fontSize: '16px',
     color: '#666',
+  },
+  emptyState: {
+    textAlign: 'center',
+    padding: '40px',
+    backgroundColor: 'white',
+    borderRadius: '8px',
+    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+    fontSize: '16px',
+    color: '#666',
+  },
+  pagination: {
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: '16px',
+    marginTop: '20px',
+  },
+  paginationButton: {
+    padding: '8px 16px',
+    backgroundColor: '#1a472a',
+    color: 'white',
+    border: 'none',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: '500',
+  },
+  pageInfo: {
+    fontSize: '14px',
+    color: '#666',
+    minWidth: '120px',
+    textAlign: 'center',
   },
 };
 

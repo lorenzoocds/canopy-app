@@ -18,12 +18,17 @@ const DashboardPage: React.FC = () => {
     workOrdersOpen: 0,
   });
   const [loading, setLoading] = useState(true);
+  const [userName, setUserName] = useState('Admin');
 
   useEffect(() => {
     const fetchCounts = async () => {
       try {
         const { data: session } = await supabase.auth.getSession();
-        const utilityCompany = session?.session?.user?.user_metadata?.utility_company;
+        const user = session?.session?.user;
+        const utilityCompany = user?.user_metadata?.utility_company;
+        const email = user?.email || 'Admin';
+        const firstName = email.split('@')[0];
+        setUserName(firstName.charAt(0).toUpperCase() + firstName.slice(1));
 
         let newCounts: Counts = {
           reportsSubmitted: 0,
@@ -93,7 +98,10 @@ const DashboardPage: React.FC = () => {
 
   return (
     <div style={styles.container}>
-      <h1 style={styles.title}>Dashboard</h1>
+      <div style={styles.welcomeSection}>
+        <h1 style={styles.title}>Welcome, {userName}</h1>
+        <p style={styles.subtitle}>Here is your dashboard overview</p>
+      </div>
 
       {loading ? (
         <div style={styles.loading}>Loading...</div>
@@ -128,11 +136,19 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '30px',
     maxWidth: '1200px',
   },
+  welcomeSection: {
+    marginBottom: '30px',
+  },
   title: {
-    margin: '0 0 30px 0',
+    margin: '0 0 8px 0',
     fontSize: '28px',
     fontWeight: 'bold',
     color: '#333',
+  },
+  subtitle: {
+    margin: '0',
+    fontSize: '14px',
+    color: '#666',
   },
   cardsGrid: {
     display: 'grid',
@@ -144,6 +160,12 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: '8px',
     padding: '20px',
     boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+    transition: 'all 0.2s ease',
+    cursor: 'pointer',
+  },
+  cardHover: {
+    boxShadow: '0 8px 16px rgba(0, 0, 0, 0.15)',
+    transform: 'translateY(-2px)',
   },
   cardLabel: {
     margin: '0 0 10px 0',

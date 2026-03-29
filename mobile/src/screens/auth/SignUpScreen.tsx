@@ -11,12 +11,21 @@ export default function SignUpScreen({ navigation }: any) {
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [passwordConfirm, setPasswordConfirm] = useState('');
   const [role, setRole] = useState<UserRole>('reporter');
   const [loading, setLoading] = useState(false);
 
   const handleSignUp = async () => {
-    if (!fullName || !email || !password) {
+    if (!fullName || !email || !password || !passwordConfirm) {
       Alert.alert('Error', 'Please fill in all fields');
+      return;
+    }
+    if (password.length < 6) {
+      Alert.alert('Error', 'Password must be at least 6 characters');
+      return;
+    }
+    if (password !== passwordConfirm) {
+      Alert.alert('Error', 'Passwords do not match');
       return;
     }
     setLoading(true);
@@ -87,6 +96,14 @@ export default function SignUpScreen({ navigation }: any) {
           placeholderTextColor="#999"
           value={password}
           onChangeText={setPassword}
+          secureTextEntry
+        />
+        <TextInput
+          style={styles.input}
+          placeholder="Confirm Password"
+          placeholderTextColor="#999"
+          value={passwordConfirm}
+          onChangeText={setPasswordConfirm}
           secureTextEntry
         />
         <TouchableOpacity

@@ -41,6 +41,8 @@ const AdminPage: React.FC = () => {
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [newCategory, setNewCategory] = useState('');
+  const [userSearch, setUserSearch] = useState('');
+  const [confirmCategoryId, setConfirmCategoryId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchAllData();
@@ -139,7 +141,7 @@ const AdminPage: React.FC = () => {
     }
   };
 
-  const handleToggleCategory = async (categoryId: string, enabled: boolean) => {
+  const handleConfirmToggleCategory = async (categoryId: string, enabled: boolean) => {
     try {
       const { error } = await supabase
         .from('categories')
@@ -147,17 +149,27 @@ const AdminPage: React.FC = () => {
         .eq('id', categoryId);
 
       if (error) throw error;
+      setConfirmCategoryId(null);
       fetchAllData();
     } catch (err) {
       console.error('Error toggling category:', err);
     }
   };
 
+  const handleToggleCategory = (categoryId: string) => {
+    setConfirmCategoryId(categoryId);
+  };
+
+  const filteredUsers = userSearch
+    ? users.filter((u) => u.email.toLowerCase().includes(userSearch.toLowerCase()) ||
+                         u.utility_company.toLowerCase().includes(userSearch.toLowerCase()))
+    : users;
+
   return (
     <div style={styles.container}>
       <h1 style={styles.title}>Admin Panel</h1>
 
-      <div style={styles.tabs}>
+      <div style={styles.tabs} role="tablist">
         <button
           onClick={() => setTab('reports')}
           style={{
@@ -290,26 +302,42 @@ const AdminPage: React.FC = () => {
           )}
 
           {tab === 'users' && (
-            <div style={styles.tableWrapper}>
-              <table style={styles.table}>
-                <thead>
-                  <tr style={styles.headerRow}>
-                    <th style={styles.th}>Email</th>
-                    <th style={styles.th}>Role</th>
-                    <th style={styles.th}>Utility Company</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {users.map((u) => (
-                    <tr key={u.id} style={styles.row}>
-                      <td style={styles.td}>{u.email}</td>
-                      <td style={styles.td}>{u.role}</td>
-                      <td style={styles.td}>{u.utility_company}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <div>
+              <div style={styles.searchBox}>
+                <input
+                  type="text"
+                  placeholder="Search by email or company..."
+                  value={userSearch}
+                  onChange={(e) => setUserSearch(e.target.value)}
+                  style={styles.searchInput}
+                />
+              </div>
+              {filteredUsers.length === 0 ? (
+                <div style={styles.emptyState}>
+                  <p>No users found</p>
+                </div>
+              ) : (
+                <div style={styles.tableWrapper}>
+                  <table style={styles.table}>
+                    <thead>
+                      <tr style={styles.headerRow}>
+                        <th style={styles.th}>Email</th>
+                        <th style={styles.th}>Role</th>
+                        <th style={styles.th}>Utility Company</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredUsers.map((u) => (
+                        <tr key={u.id} style={styles.row}>
+                          <td style={styles.td}>{u.email}</td>
+                          <td style={styles.td}>{u.role}</td>
+                          <td style={styles.td}>{u.utility_company}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
           )}
 
           {tab === 'categories' && (
@@ -343,7 +371,7 @@ const AdminPage: React.FC = () => {
                         <td style={styles.td}>{c.enabled ? 'Yes' : 'No'}</td>
                         <td style={styles.td}>
                           <button
-                            onClick={() => handleToggleCategory(c.id, c.enabled)}
+                            onClick={() => handleToggleCategory(c.id)}
                             style={c.enabled ? styles.disableButton : styles.enableButton}
                           >
                             {c.enabled ? 'Disable' : 'Enable'}
@@ -357,6 +385,34 @@ const AdminPage: React.FC = () => {
             </div>
           )}
         </>
+      )}
+
+      {confirmCategoryId && (
+        <div style={styles.modalOverlay} onClick={() => setConfirmCategoryId(null)}>
+          <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+            <h2 style={styles.modalTitle}>Confirm Category Status Change</h2>
+            <p style={styles.confirmText}>Are you sure you want to change this category status?</p>
+            <div style={styles.modalActions}>
+              <button
+                onClick={() => setConfirmCategoryId(null)}
+                style={styles.cancelButton}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  const category = categories.find((c) => c.id === confirmCategoryId);
+                  if (category) {
+                    handleConfirmToggleCategory(confirmCategoryId, category.enabled);
+                  }
+                }}
+                style={{...styles.actionBtn, ...styles.primaryBtn}}
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -503,6 +559,83 @@ const styles: Record<string, React.CSSProperties> = {
     textAlign: 'center',
     fontSize: '16px',
     color: '#666',
+  },
+  searchBox: {
+    marginBottom: '20px',
+  },
+  searchInput: {
+    width: '100%',
+    padding: '10px 12px',
+    border: '1px solid #ddd',
+    borderRadius: '4px',
+    fontSize: '14px',
+    boxSizing: 'border-box',
+  },
+  emptyState: {
+    textAlign: 'center',
+    padding: '40px',
+    backgroundColor: 'white',
+    borderRadius: '8px',
+    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+    fontSize: '16px',
+    color: '#666',
+  },
+  modalOverlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  modal: {
+    backgroundColor: 'white',
+    borderRadius: '8px',
+    padding: '30px',
+    maxWidth: '400px',
+    width: '90%',
+  },
+  modalTitle: {
+    margin: '0 0 20px 0',
+    fontSize: '24px',
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  confirmText: {
+    fontSize: '16px',
+    margin: '16px 0',
+    color: '#333',
+  },
+  modalActions: {
+    display: 'flex',
+    gap: '10px',
+    justifyContent: 'flex-end',
+    marginTop: '20px',
+  },
+  cancelButton: {
+    padding: '10px 16px',
+    border: '1px solid #ddd',
+    backgroundColor: 'white',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: '500',
+  },
+  actionBtn: {
+    padding: '10px 16px',
+    border: 'none',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: '500',
+  },
+  primaryBtn: {
+    backgroundColor: '#388e3c',
+    color: 'white',
   },
 };
 

@@ -6,12 +6,18 @@ import { supabase } from '../../lib/supabase';
 import { Report } from '../../types/database';
 
 const STATUS_COLORS: Record<string, string> = {
-  submitted: '#3498db',
-  dispatched: '#f39c12',
+  submitted: '#ffeb3b',
+  dispatched: '#3498db',
   verified: '#2ecc71',
   rejected: '#e74c3c',
   work_order_created: '#9b59b6',
   resolved: '#95a5a6',
+};
+
+const STATUS_LABELS: Record<string, string> = {
+  submitted: 'Submitted',
+  dispatched: 'Dispatched',
+  verified: 'Verified',
 };
 
 export default function ReporterHomeScreen({ navigation }: any) {
@@ -66,6 +72,29 @@ export default function ReporterHomeScreen({ navigation }: any) {
         ))}
       </MapView>
 
+      {reports.length === 0 && (
+        <View style={styles.emptyState}>
+          <Text style={styles.emptyStateIcon}>📍</Text>
+          <Text style={styles.emptyStateTitle}>No Reports Yet</Text>
+          <Text style={styles.emptyStateText}>Reports you submit will appear here</Text>
+        </View>
+      )}
+
+      <View style={styles.legend}>
+        <View style={styles.legendItem}>
+          <View style={[styles.legendDot, { backgroundColor: '#ffeb3b' }]} />
+          <Text style={styles.legendLabel}>Submitted</Text>
+        </View>
+        <View style={styles.legendItem}>
+          <View style={[styles.legendDot, { backgroundColor: '#3498db' }]} />
+          <Text style={styles.legendLabel}>Dispatched</Text>
+        </View>
+        <View style={styles.legendItem}>
+          <View style={[styles.legendDot, { backgroundColor: '#2ecc71' }]} />
+          <Text style={styles.legendLabel}>Verified</Text>
+        </View>
+      </View>
+
       <TouchableOpacity
         style={styles.fab}
         onPress={() => navigation.navigate('SubmitReport')}
@@ -79,6 +108,22 @@ export default function ReporterHomeScreen({ navigation }: any) {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   map: { width: Dimensions.get('window').width, height: Dimensions.get('window').height },
+  emptyState: {
+    position: 'absolute', top: '50%', left: 0, right: 0,
+    alignItems: 'center', transform: [{ translateY: -80 }],
+  },
+  emptyStateIcon: { fontSize: 56, marginBottom: 16 },
+  emptyStateTitle: { fontSize: 20, fontWeight: '700', color: '#1a472a', marginBottom: 8 },
+  emptyStateText: { fontSize: 14, color: '#6b7c6b', textAlign: 'center', paddingHorizontal: 20 },
+  legend: {
+    position: 'absolute', bottom: 120, left: 16, right: 16,
+    backgroundColor: '#fff', borderRadius: 14, padding: 14,
+    elevation: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15, shadowRadius: 4,
+  },
+  legendItem: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
+  legendDot: { width: 12, height: 12, borderRadius: 6, marginRight: 8 },
+  legendLabel: { fontSize: 13, color: '#333', fontWeight: '600' },
   fab: {
     position: 'absolute', bottom: 100, alignSelf: 'center',
     backgroundColor: '#1a472a', borderRadius: 28, paddingHorizontal: 24,

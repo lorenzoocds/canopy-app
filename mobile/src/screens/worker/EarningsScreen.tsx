@@ -90,6 +90,13 @@ export default function EarningsScreen() {
         data={earnings}
         keyExtractor={(item) => item.id}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        ListEmptyComponent={
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyStateIcon}>💰</Text>
+            <Text style={styles.emptyStateTitle}>No Earnings Yet</Text>
+            <Text style={styles.emptyStateText}>Complete jobs to start earning money</Text>
+          </View>
+        }
         renderItem={({ item }) => (
           <View style={styles.earningRow}>
             <View>
@@ -106,6 +113,12 @@ export default function EarningsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f8faf8' },
+  emptyState: {
+    flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 80,
+  },
+  emptyStateIcon: { fontSize: 56, marginBottom: 16 },
+  emptyStateTitle: { fontSize: 18, fontWeight: '700', color: '#1a472a', marginBottom: 8 },
+  emptyStateText: { fontSize: 14, color: '#6b7c6b', textAlign: 'center', paddingHorizontal: 20 },
   heading: { fontSize: 24, fontWeight: '800', color: '#1a472a', padding: 20, paddingBottom: 10 },
   summaryRow: { flexDirection: 'row', paddingHorizontal: 16, gap: 8 },
   summaryCard: {

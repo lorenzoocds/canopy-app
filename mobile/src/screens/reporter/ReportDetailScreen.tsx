@@ -57,8 +57,13 @@ export default function ReportDetailScreen({ route }: any) {
 
   if (!report) {
     return (
-      <View style={styles.loading}>
-        <Text>Loading...</Text>
+      <View style={styles.container}>
+        <View style={styles.photoSkeleton} />
+        <View style={styles.infoSection}>
+          <View style={styles.skeletonLine} />
+          <View style={[styles.skeletonLine, { width: '70%', marginTop: 12 }]} />
+          <View style={[styles.skeletonLine, { width: '85%', marginTop: 12 }]} />
+        </View>
       </View>
     );
   }
@@ -133,7 +138,8 @@ export default function ReportDetailScreen({ route }: any) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f8faf8' },
-  loading: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  photoSkeleton: { width: '100%', height: 250, backgroundColor: '#e0e8e0' },
+  skeletonLine: { height: 12, backgroundColor: '#e0e8e0', borderRadius: 6, width: '90%' },
   photo: { width: '100%', height: 250 },
   infoSection: { padding: 20 },
   category: { fontSize: 22, fontWeight: '800', color: '#1a472a' },
@@ -144,14 +150,14 @@ const styles = StyleSheet.create({
   stepRow: { flexDirection: 'row', minHeight: 56 },
   stepIndicatorCol: { width: 32, alignItems: 'center' },
   stepDot: {
-    width: 24, height: 24, borderRadius: 12, borderWidth: 2,
+    width: 28, height: 28, borderRadius: 14, borderWidth: 2,
     borderColor: '#d0d8d0', backgroundColor: '#fff',
     justifyContent: 'center', alignItems: 'center',
   },
   stepDotComplete: { borderColor: '#27ae60', backgroundColor: '#27ae60' },
-  stepDotCurrent: { borderColor: '#1a472a', backgroundColor: '#1a472a', transform: [{ scale: 1.1 }] },
+  stepDotCurrent: { borderColor: '#1a472a', backgroundColor: '#1a472a', transform: [{ scale: 1.15 }], shadowColor: '#1a472a', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.3, shadowRadius: 6 },
   checkmark: { color: '#fff', fontSize: 12, fontWeight: '700' },
-  stepLine: { flex: 1, width: 2, backgroundColor: '#d0d8d0', marginVertical: 2 },
+  stepLine: { flex: 1, width: 3, backgroundColor: '#d0d8d0', marginVertical: 2 },
   stepLineComplete: { backgroundColor: '#27ae60' },
   stepContent: { flex: 1, paddingLeft: 14, paddingBottom: 20 },
   stepLabel: { fontSize: 15, fontWeight: '600', color: '#999' },

@@ -24,6 +24,16 @@ export default function JobOfferModal({
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
+  const handleAcceptWithHaptic = () => {
+    Vibration.vibrate([0, 200]);
+    onAccept();
+  };
+
+  const handleDeclineWithHaptic = () => {
+    Vibration.vibrate([0, 100, 100, 100]);
+    onDecline();
+  };
+
   useEffect(() => {
     if (visible) {
       setTimeLeft(COUNTDOWN_SECONDS);
@@ -167,12 +177,12 @@ export default function JobOfferModal({
 
           {/* Action Buttons */}
           <View style={styles.buttonRow}>
-            <TouchableOpacity style={styles.declineBtn} onPress={onDecline}>
+            <TouchableOpacity style={styles.declineBtn} onPress={handleDeclineWithHaptic}>
               <Text style={styles.declineBtnText}>DECLINE</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.acceptBtn, { backgroundColor: accentColor }]}
-              onPress={onAccept}
+              onPress={handleAcceptWithHaptic}
             >
               <Text style={styles.acceptBtnText}>ACCEPT</Text>
             </TouchableOpacity>
@@ -207,12 +217,12 @@ const styles = StyleSheet.create({
   jobSubdetail: { fontSize: 14, color: '#666', marginTop: 4, textAlign: 'center' },
   jobWindow: { fontSize: 13, color: '#e67e22', marginTop: 8, fontWeight: '600' },
   payoutBox: {
-    borderRadius: 16, paddingVertical: 14, paddingHorizontal: 28,
+    borderRadius: 16, paddingVertical: 20, paddingHorizontal: 28,
     alignItems: 'center', marginBottom: 20, width: '100%',
   },
-  payoutLabel: { fontSize: 12, color: '#888', fontWeight: '600' },
-  payoutAmount: { fontSize: 32, fontWeight: '900', marginTop: 2 },
-  payoutMiles: { fontSize: 12, color: '#888', marginTop: 2 },
+  payoutLabel: { fontSize: 13, color: '#888', fontWeight: '600' },
+  payoutAmount: { fontSize: 44, fontWeight: '900', marginTop: 6 },
+  payoutMiles: { fontSize: 13, color: '#888', marginTop: 4 },
   countdownContainer: {
     justifyContent: 'center', alignItems: 'center',
     marginBottom: 24, width: 80, height: 80,

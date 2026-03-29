@@ -67,6 +67,10 @@ export default function LoginScreen({ navigation }: any) {
           )}
         </TouchableOpacity>
 
+        <TouchableOpacity onPress={() => Alert.alert('Password Reset', 'Check your email for password reset instructions')}>
+          <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
+        </TouchableOpacity>
+
         <TouchableOpacity onPress={() => navigation.navigate('SignUp')}>
           <Text style={styles.linkText}>
             Don't have an account? <Text style={styles.linkBold}>Sign Up</Text>
@@ -91,6 +95,7 @@ const styles = StyleSheet.create({
   button: { borderRadius: 12, padding: 16, alignItems: 'center', marginTop: 8 },
   buttonPrimary: { backgroundColor: '#1a472a' },
   buttonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  forgotPasswordText: { textAlign: 'center', color: '#1a472a', marginTop: 12, fontSize: 14, fontWeight: '600' },
   linkText: { textAlign: 'center', color: '#6b7c6b', marginTop: 20, fontSize: 14 },
   linkBold: { color: '#1a472a', fontWeight: '700' },
 });

@@ -26,6 +26,8 @@ const ErrandsPage: React.FC = () => {
   const [showModal, setShowModal] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [selectedErrand, setSelectedErrand] = useState<Errand | null>(null);
+  const [showConfirmation, setShowConfirmation] = useState(false);
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [formData, setFormData] = useState({
     title: '',
     itemDescription: '',
@@ -74,9 +76,23 @@ const ErrandsPage: React.FC = () => {
     return baseAmount + miles * 0.5;
   };
 
-  const handleSubmitErrand = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const validateForm = (): boolean => {
+    const errors: Record<string, string> = {};
 
+    if (!formData.title.trim()) errors.title = 'Title is required';
+    if (!formData.itemDescription.trim()) errors.itemDescription = 'Item description is required';
+    if (formData.quantity <= 0) errors.quantity = 'Quantity must be greater than 0';
+    if (!formData.pickupAddress.trim()) errors.pickupAddress = 'Pickup address is required';
+    if (!formData.pickupWindowStart) errors.pickupWindowStart = 'Pickup window start is required';
+    if (!formData.pickupWindowEnd) errors.pickupWindowEnd = 'Pickup window end is required';
+    if (!formData.dropoffAddress.trim()) errors.dropoffAddress = 'Dropoff address is required';
+    if (formData.payoutAmount <= 0) errors.payoutAmount = 'Payout amount must be greater than 0';
+
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  const handleConfirmSubmitErrand = async () => {
     try {
       const { data: session } = await supabase.auth.getSession();
       const utilityCompany = session?.session?.user?.user_metadata?.utility_company;
@@ -103,6 +119,7 @@ const ErrandsPage: React.FC = () => {
       if (error) throw error;
 
       fetchErrands();
+      setShowConfirmation(false);
       setShowModal(false);
       setFormData({
         title: '',
@@ -116,8 +133,16 @@ const ErrandsPage: React.FC = () => {
         dropoffInstructions: '',
         payoutAmount: 15,
       });
+      setFormErrors({});
     } catch (err) {
       console.error('Error creating errand:', err);
+    }
+  };
+
+  const handleSubmitErrand = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (validateForm()) {
+      setShowConfirmation(true);
     }
   };
 
@@ -195,8 +220,9 @@ const ErrandsPage: React.FC = () => {
                   value={formData.title}
                   onChange={(e) => setFormData({ ...formData, title: e.target.value })}
                   required
-                  style={styles.input}
+                  style={{...styles.input, ...(formErrors.title ? styles.inputError : {})}}
                 />
+                {formErrors.title && <span style={styles.errorMessage}>{formErrors.title}</span>}
               </div>
 
               <div style={styles.formGroup}>
@@ -301,6 +327,24 @@ const ErrandsPage: React.FC = () => {
                 Post Errand
               </button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {showConfirmation && (
+        <div style={styles.modalOverlay} onClick={() => setShowConfirmation(false)}>
+          <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+            <h2 style={styles.modalTitle}>Confirm Errand</h2>
+            <p style={styles.confirmText}>Are you sure you want to post this errand?</p>
+            <p style={styles.payoutText}>Estimated Payout: ${calculatePayout(formData.payoutAmount).toFixed(2)}</p>
+            <div style={styles.modalActions}>
+              <button onClick={() => setShowConfirmation(false)} style={styles.cancelButton}>
+                Cancel
+              </button>
+              <button onClick={handleConfirmSubmitErrand} style={{...styles.actionBtn, ...styles.primaryBtn}}>
+                Confirm & Post
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -508,6 +552,16 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: '14px',
     boxSizing: 'border-box',
   },
+  inputError: {
+    borderColor: '#d32f2f',
+    backgroundColor: '#fff5f5',
+  },
+  errorMessage: {
+    color: '#d32f2f',
+    fontSize: '12px',
+    marginTop: '4px',
+    display: 'block',
+  },
   hint: {
     margin: '4px 0 0 0',
     fontSize: '12px',
@@ -547,6 +601,38 @@ const styles: Record<string, React.CSSProperties> = {
     textAlign: 'center',
     fontSize: '16px',
     color: '#666',
+  },
+  confirmText: {
+    fontSize: '16px',
+    margin: '16px 0',
+    color: '#333',
+  },
+  payoutText: {
+    fontSize: '14px',
+    fontWeight: 'bold',
+    color: '#388e3c',
+    margin: '12px 0',
+  },
+  cancelButton: {
+    padding: '10px 16px',
+    border: '1px solid #ddd',
+    backgroundColor: 'white',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: '500',
+  },
+  actionBtn: {
+    padding: '10px 16px',
+    border: 'none',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: '500',
+  },
+  primaryBtn: {
+    backgroundColor: '#388e3c',
+    color: 'white',
   },
 };
 

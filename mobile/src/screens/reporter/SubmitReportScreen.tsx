@@ -130,7 +130,12 @@ export default function SubmitReportScreen({ navigation }: any) {
       {/* Photo */}
       <TouchableOpacity style={styles.photoBox} onPress={() => setShowCamera(true)}>
         {photoUri ? (
-          <Image source={{ uri: photoUri }} style={styles.photoPreview} />
+          <>
+            <Image source={{ uri: photoUri }} style={styles.photoPreview} />
+            <TouchableOpacity style={styles.retakeButton} onPress={() => { setPhotoUri(null); setShowCamera(true); }}>
+              <Text style={styles.retakeButtonText}>Retake Photo</Text>
+            </TouchableOpacity>
+          </>
         ) : (
           <View style={styles.photoPlaceholder}>
             <Text style={styles.photoPlaceholderIcon}>📷</Text>
@@ -163,15 +168,18 @@ export default function SubmitReportScreen({ navigation }: any) {
       </View>
 
       {/* Description */}
-      <TextInput
-        style={styles.textArea}
-        placeholder="Optional description..."
-        placeholderTextColor="#999"
-        value={description}
-        onChangeText={setDescription}
-        multiline
-        numberOfLines={3}
-      />
+      <View>
+        <TextInput
+          style={styles.textArea}
+          placeholder="Optional description..."
+          placeholderTextColor="#999"
+          value={description}
+          onChangeText={setDescription}
+          multiline
+          numberOfLines={3}
+        />
+        <Text style={styles.charCount}>{description.length}/500 characters</Text>
+      </View>
 
       {/* Bounty badge */}
       <View style={styles.bountyBadge}>
@@ -185,7 +193,10 @@ export default function SubmitReportScreen({ navigation }: any) {
         disabled={loading}
       >
         {loading ? (
-          <ActivityIndicator color="#fff" />
+          <>
+            <ActivityIndicator color="#fff" />
+            <Text style={styles.submitBtnLoadingText}>Uploading...</Text>
+          </>
         ) : (
           <Text style={styles.submitBtnText}>Submit Report</Text>
         )}
@@ -200,6 +211,11 @@ const styles = StyleSheet.create({
   heading: { fontSize: 24, fontWeight: '800', color: '#1a472a', marginBottom: 20 },
   photoBox: { borderRadius: 16, overflow: 'hidden', marginBottom: 16, height: 200 },
   photoPreview: { width: '100%', height: '100%' },
+  retakeButton: {
+    position: 'absolute', bottom: 12, right: 12,
+    backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8,
+  },
+  retakeButtonText: { color: '#fff', fontSize: 12, fontWeight: '700' },
   photoPlaceholder: {
     width: '100%', height: '100%', backgroundColor: '#e8efe8',
     justifyContent: 'center', alignItems: 'center', borderRadius: 16,
@@ -228,8 +244,9 @@ const styles = StyleSheet.create({
   textArea: {
     backgroundColor: '#fff', borderRadius: 12, padding: 14,
     fontSize: 15, borderWidth: 1, borderColor: '#e0e8e0',
-    minHeight: 80, textAlignVertical: 'top', marginBottom: 16,
+    minHeight: 80, textAlignVertical: 'top', marginBottom: 4,
   },
+  charCount: { fontSize: 12, color: '#999', paddingHorizontal: 6, marginBottom: 16, textAlign: 'right' },
   bountyBadge: {
     backgroundColor: '#f0f7f0', borderRadius: 12, padding: 14,
     alignItems: 'center', marginBottom: 20,
@@ -237,9 +254,10 @@ const styles = StyleSheet.create({
   bountyText: { fontSize: 16, fontWeight: '700', color: '#1a472a' },
   submitBtn: {
     backgroundColor: '#1a472a', borderRadius: 14, padding: 18,
-    alignItems: 'center', marginBottom: 40,
+    alignItems: 'center', marginBottom: 40, justifyContent: 'center',
   },
   submitBtnText: { color: '#fff', fontSize: 17, fontWeight: '700' },
+  submitBtnLoadingText: { color: '#fff', fontSize: 14, fontWeight: '600', marginTop: 6 },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
   permText: { fontSize: 16, color: '#333', marginBottom: 16, textAlign: 'center' },
   permBtn: { backgroundColor: '#1a472a', borderRadius: 12, padding: 14, paddingHorizontal: 24 },

@@ -2,8 +2,8 @@ import { createClient } from '@supabase/supabase-js';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
-const supabaseUrl = 'https://wowyavzbcmegwqnmulff.supabase.co';
-const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indvd3lhdnpiY21lZ3dxbm11bGZmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ3OTM3OTUsImV4cCI6MjA5MDM2OTc5NX0.np2MY9MaCNXZoGawIV4zWmCeyQgLJs1tX6n2fUwsYKo';
+const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://wowyavzbcmegwqnmulff.supabase.co';
+const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indvd3lhdnpiY21lZ3dxbm11bGZmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ3OTM3OTUsImV4cCI6MjA5MDM2OTc5NX0.np2MY9MaCNXZoGawIV4zWmCeyQgLJs1tX6n2fUwsYKo';
 
 const ExpoSecureStoreAdapter = {
   getItem: async (key: string): Promise<string | null> => {

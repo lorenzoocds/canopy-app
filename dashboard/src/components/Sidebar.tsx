@@ -1,5 +1,5 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 
 interface SidebarProps {
@@ -8,6 +8,7 @@ interface SidebarProps {
 
 const Sidebar: React.FC<SidebarProps> = ({ userRole }) => {
   const navigate = useNavigate();
+  const location = useLocation();
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -22,16 +23,17 @@ const Sidebar: React.FC<SidebarProps> = ({ userRole }) => {
       </div>
 
       <nav style={styles.nav}>
-        <NavLink icon="▪" label="Dashboard" onClick={() => navigate('/dashboard')} />
-        <NavLink icon="▪" label="Reports" onClick={() => navigate('/reports')} />
-        <NavLink icon="▪" label="Errands" onClick={() => navigate('/errands')} />
-        <NavLink icon="▪" label="Work Orders" onClick={() => navigate('/work-orders')} />
+        <NavLink icon="▪" label="Dashboard" onClick={() => navigate('/dashboard')} isActive={location.pathname === '/dashboard'} />
+        <NavLink icon="▪" label="Reports" onClick={() => navigate('/reports')} isActive={location.pathname === '/reports'} />
+        <NavLink icon="▪" label="Errands" onClick={() => navigate('/errands')} isActive={location.pathname === '/errands'} />
+        <NavLink icon="▪" label="Work Orders" onClick={() => navigate('/work-orders')} isActive={location.pathname === '/work-orders'} />
         {userRole === 'super_admin' && (
-          <NavLink icon="▪" label="Admin" onClick={() => navigate('/admin')} />
+          <NavLink icon="▪" label="Admin" onClick={() => navigate('/admin')} isActive={location.pathname === '/admin'} />
         )}
       </nav>
 
       <div style={styles.footer}>
+        <p style={styles.versionText}>v0.1.0</p>
         <p style={styles.roleText}>Role: {userRole}</p>
         <button onClick={handleLogout} style={styles.logoutButton}>
           Logout
@@ -45,12 +47,16 @@ interface NavLinkProps {
   icon: string;
   label: string;
   onClick: () => void;
+  isActive?: boolean;
 }
 
-const NavLink: React.FC<NavLinkProps> = ({ icon, label, onClick }) => (
+const NavLink: React.FC<NavLinkProps> = ({ icon, label, onClick, isActive }) => (
   <button
     onClick={onClick}
-    style={styles.navLink}
+    style={{
+      ...styles.navLink,
+      ...(isActive ? styles.navLinkActive : {}),
+    }}
   >
     <span style={styles.navIcon}>{icon}</span>
     <span>{label}</span>
@@ -100,6 +106,12 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     gap: '10px',
     transition: 'backgroundColor 0.2s',
+    width: '100%',
+  },
+  navLinkActive: {
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    borderLeft: '3px solid white',
+    paddingLeft: '17px',
   },
   navIcon: {
     fontSize: '10px',
@@ -112,7 +124,13 @@ const styles: Record<string, React.CSSProperties> = {
   roleText: {
     margin: '0 0 10px 0',
     fontSize: '12px',
-    opacity: 0.7',
+    opacity: 0.7,
+  },
+  versionText: {
+    margin: '0 0 10px 0',
+    fontSize: '11px',
+    opacity: 0.6,
+    textAlign: 'center',
   },
   logoutButton: {
     width: '100%',

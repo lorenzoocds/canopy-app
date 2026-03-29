@@ -95,7 +95,7 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: 'center',
     alignItems: 'center',
     height: '100vh',
-    backgroundColor: '#f5f5f5',
+    background: 'linear-gradient(135deg, #1a472a 0%, #2d6a42 100%)',
   },
   card: {
     backgroundColor: 'white',
@@ -150,12 +150,13 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: '600',
   },
   error: {
-    color: '#d32f2f',
+    color: '#c62828',
     fontSize: '14px',
     marginTop: '10px',
-    padding: '10px',
-    backgroundColor: '#ffebee',
+    padding: '12px',
+    backgroundColor: '#ffcdd2',
     borderRadius: '4px',
+    border: '1px solid #ef5350',
   },
 };
 
