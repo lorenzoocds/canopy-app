@@ -60,26 +60,26 @@ const App: React.FC = () => {
     return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', fontSize: '18px' }}>Loading...</div>;
   }
 
-  if (!session) {
-    return <LoginPage />;
-  }
-
   return (
     <Router>
-      <div style={{ display: 'flex', height: '100vh' }}>
-        <Sidebar userRole={userRole} />
-        <main style={{ flex: 1, overflowY: 'auto', backgroundColor: '#f5f5f5' }}>
-          <Routes>
-            <Route path="/login" element={<Navigate to="/dashboard" />} />
-            <Route path="/dashboard" element={<DashboardPage />} />
-            <Route path="/reports" element={<ReportsPage />} />
-            <Route path="/errands" element={<ErrandsPage />} />
-            <Route path="/work-orders" element={<WorkOrdersPage />} />
-            {userRole === 'super_admin' && <Route path="/admin" element={<AdminPage />} />}
-            <Route path="*" element={<Navigate to="/dashboard" />} />
-          </Routes>
-        </main>
-      </div>
+      {!session ? (
+        <LoginPage />
+      ) : (
+        <div style={{ display: 'flex', height: '100vh' }}>
+          <Sidebar userRole={userRole} />
+          <main style={{ flex: 1, overflowY: 'auto', backgroundColor: '#f5f5f5' }}>
+            <Routes>
+              <Route path="/login" element={<Navigate to="/dashboard" />} />
+              <Route path="/dashboard" element={<DashboardPage />} />
+              <Route path="/reports" element={<ReportsPage />} />
+              <Route path="/errands" element={<ErrandsPage />} />
+              <Route path="/work-orders" element={<WorkOrdersPage />} />
+              {userRole === 'super_admin' && <Route path="/admin" element={<AdminPage />} />}
+              <Route path="*" element={<Navigate to="/dashboard" />} />
+            </Routes>
+          </main>
+        </div>
+      )}
     </Router>
   );
 };
