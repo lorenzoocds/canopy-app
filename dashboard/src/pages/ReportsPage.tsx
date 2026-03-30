@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
+import { dispatchJob } from '../lib/dispatch';
 
 interface Report {
   id: string;
@@ -24,8 +25,12 @@ const ReportsPage: React.FC = () => {
   const [selectedReport, setSelectedReport] = useState<Report | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>('');
+  const [sourceFilter, setSourceFilter] = useState<string>('');
   const [currentPage, setCurrentPage] = useState(1);
   const [userUtilityCompany, setUserUtilityCompany] = useState<string | null>(null);
+  const [dispatchEnabled, setDispatchEnabled] = useState(false);
+  const [dispatchLoading, setDispatchLoading] = useState(false);
+  const [dispatchResult, setDispatchResult] = useState<string | null>(null);
   const itemsPerPage = 10;
 
   useEffect(() => {
@@ -72,6 +77,9 @@ const ReportsPage: React.FC = () => {
 
   const handleCreateWorkOrder = async (reportId: string) => {
     try {
+      setDispatchLoading(true);
+      setDispatchResult(null);
+
       const { error } = await supabase
         .from('reports')
         .update({ work_order_created: true })
@@ -95,10 +103,36 @@ const ReportsPage: React.FC = () => {
         if (woError) throw woError;
       }
 
+      // Optionally dispatch via DoorDash
+      if (dispatchEnabled && selectedReport) {
+        const result = await dispatchJob({
+          jobType: 'verify',
+          reportId: reportId,
+          pickupAddress: selectedReport.address || '',
+          pickupLat: 0, // Will use address-based lookup in production
+          pickupLng: 0,
+          dropoffAddress: selectedReport.address || '',
+          dropoffLat: 0,
+          dropoffLng: 0,
+          taskDescription: `Verify reported ${selectedReport.category} at ${selectedReport.address}`,
+          payoutAmount: 7.00,
+        });
+
+        if (result.success) {
+          setDispatchResult(`Dispatched to DoorDash! Delivery ID: ${result.deliveryId}`);
+        } else {
+          setDispatchResult(`Work order saved. DoorDash dispatch failed: ${result.error}`);
+        }
+      }
+
       fetchReports();
-      setShowModal(false);
+      if (!dispatchEnabled) {
+        setShowModal(false);
+      }
     } catch (err) {
       console.error('Error creating work order:', err);
+    } finally {
+      setDispatchLoading(false);
     }
   };
 
@@ -118,9 +152,11 @@ const ReportsPage: React.FC = () => {
     }
   };
 
-  const filteredReports = statusFilter
-    ? reports.filter((r) => r.status === statusFilter)
-    : reports;
+  const filteredReports = reports.filter((r) => {
+    if (statusFilter && r.status !== statusFilter) return false;
+    if (sourceFilter && (r as any).source !== sourceFilter) return false;
+    return true;
+  });
 
   const totalPages = Math.ceil(filteredReports.length / itemsPerPage);
   const paginatedReports = filteredReports.slice(
@@ -129,11 +165,12 @@ const ReportsPage: React.FC = () => {
   );
 
   const exportToCSV = () => {
-    const headers = ['Date', 'Category', 'Address', 'Status', 'Bounty', 'Notes'];
+    const headers = ['Date', 'Category', 'Address', 'Source', 'Status', 'Bounty', 'Notes'];
     const rows = filteredReports.map((r) => [
       new Date(r.created_at).toLocaleDateString(),
       r.category,
       r.address,
+      (r as any).source || 'canopy_app',
       r.status,
       `$${r.bounty_amount}`,
       r.notes,
@@ -158,6 +195,24 @@ const ReportsPage: React.FC = () => {
       <div style={styles.header}>
         <h1 style={styles.title}>Reports</h1>
         <div style={styles.headerActions}>
+          <div style={styles.sourceChips}>
+            {[
+              { label: 'All Sources', value: '' },
+              { label: 'Canopy App', value: 'canopy_app' },
+              { label: 'NYC 311', value: '311_nyc' },
+            ].map((chip) => (
+              <button
+                key={chip.value}
+                onClick={() => { setSourceFilter(chip.value); setCurrentPage(1); }}
+                style={{
+                  ...styles.chip,
+                  ...(sourceFilter === chip.value ? styles.chipActive : {}),
+                }}
+              >
+                {chip.label}
+              </button>
+            ))}
+          </div>
           <select
             value={statusFilter}
             onChange={(e) => {
@@ -192,6 +247,7 @@ const ReportsPage: React.FC = () => {
                   <th style={styles.th}>Date</th>
                   <th style={styles.th}>Category</th>
                   <th style={styles.th}>Address</th>
+                  <th style={styles.th}>Source</th>
                   <th style={styles.th}>Status</th>
                   <th style={styles.th}>Bounty</th>
                   <th style={styles.th}>Actions</th>
@@ -210,6 +266,16 @@ const ReportsPage: React.FC = () => {
                   <td style={styles.td}>{new Date(report.created_at).toLocaleDateString()}</td>
                   <td style={styles.td}>{report.category}</td>
                   <td style={styles.td}>{report.address}</td>
+                  <td style={styles.td}>
+                    <span style={{
+                      ...styles.sourceBadge,
+                      ...((report as any).source === '311_nyc'
+                        ? { backgroundColor: '#e3f2fd', color: '#0d47a1' }
+                        : { backgroundColor: '#e8f5e9', color: '#2e7d32' }),
+                    }}>
+                      {(report as any).source === '311_nyc' ? 'NYC 311' : 'Canopy'}
+                    </span>
+                  </td>
                   <td style={styles.td}>
                     <span style={{ ...styles.badge, ...getStatusBadgeColor(report.status) }}>
                       {report.status}
@@ -308,13 +374,39 @@ const ReportsPage: React.FC = () => {
               </div>
             </div>
 
+            {selectedReport.status === 'verified' && !selectedReport.work_order_created && (
+              <div style={styles.dispatchToggle}>
+                <label style={styles.toggleLabel}>
+                  <input
+                    type="checkbox"
+                    checked={dispatchEnabled}
+                    onChange={(e) => setDispatchEnabled(e.target.checked)}
+                    style={styles.checkbox}
+                  />
+                  Dispatch via DoorDash
+                </label>
+                <span style={styles.toggleHint}>
+                  {dispatchEnabled
+                    ? 'A DoorDash Dasher will be assigned to verify this report'
+                    : 'Work order saved without dispatch (manual verification)'}
+                </span>
+              </div>
+            )}
+
+            {dispatchResult && (
+              <div style={styles.dispatchResultBox}>
+                {dispatchResult}
+              </div>
+            )}
+
             <div style={styles.modalActions}>
               {selectedReport.status === 'verified' && !selectedReport.work_order_created && (
                 <button
                   onClick={() => handleCreateWorkOrder(selectedReport.id)}
-                  style={{...styles.actionBtn, ...styles.primaryBtn}}
+                  disabled={dispatchLoading}
+                  style={{...styles.actionBtn, ...styles.primaryBtn, ...(dispatchLoading ? {opacity: 0.6} : {})}}
                 >
-                  Create Work Order
+                  {dispatchLoading ? 'Dispatching...' : dispatchEnabled ? 'Create & Dispatch' : 'Create Work Order'}
                 </button>
               )}
               {selectedReport.status !== 'rejected' && (
@@ -358,6 +450,32 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     gap: '12px',
     alignItems: 'center',
+  },
+  sourceChips: {
+    display: 'flex',
+    gap: '6px',
+  },
+  chip: {
+    padding: '6px 14px',
+    border: '1px solid #ddd',
+    borderRadius: '20px',
+    backgroundColor: 'white',
+    cursor: 'pointer',
+    fontSize: '13px',
+    fontWeight: '500',
+    color: '#666',
+  },
+  chipActive: {
+    backgroundColor: '#1a472a',
+    color: 'white',
+    borderColor: '#1a472a',
+  },
+  sourceBadge: {
+    display: 'inline-block',
+    padding: '3px 8px',
+    borderRadius: '12px',
+    fontSize: '11px',
+    fontWeight: '600',
   },
   filterSelect: {
     padding: '10px 12px',
@@ -514,6 +632,43 @@ const styles: Record<string, React.CSSProperties> = {
   dangerBtn: {
     backgroundColor: '#d32f2f',
     color: 'white',
+  },
+  dispatchToggle: {
+    padding: '12px',
+    backgroundColor: '#f0f7f0',
+    borderRadius: '6px',
+    border: '1px solid #c8e6c9',
+    marginBottom: '16px',
+  },
+  toggleLabel: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    fontSize: '14px',
+    fontWeight: '600',
+    color: '#1a472a',
+    cursor: 'pointer',
+  },
+  checkbox: {
+    width: '18px',
+    height: '18px',
+    cursor: 'pointer',
+  },
+  toggleHint: {
+    display: 'block',
+    fontSize: '12px',
+    color: '#666',
+    marginTop: '4px',
+    marginLeft: '26px',
+  },
+  dispatchResultBox: {
+    padding: '10px 14px',
+    backgroundColor: '#e8f5e9',
+    borderRadius: '4px',
+    border: '1px solid #a5d6a7',
+    fontSize: '13px',
+    color: '#2e7d32',
+    marginBottom: '16px',
   },
   loading: {
     textAlign: 'center',
