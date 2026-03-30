@@ -25,23 +25,40 @@ const ReportsPage: React.FC = () => {
   const [showModal, setShowModal] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [currentPage, setCurrentPage] = useState(1);
+  const [userUtilityCompany, setUserUtilityCompany] = useState<string | null>(null);
   const itemsPerPage = 10;
 
   useEffect(() => {
+    fetchUserProfile();
     fetchReports();
   }, []);
 
+  const fetchUserProfile = async () => {
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const userId = sessionData?.session?.user?.id;
+      if (!userId) return;
+
+      const { data: profile, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', userId)
+        .single();
+
+      if (error) throw error;
+      if (profile?.utility_company) {
+        setUserUtilityCompany(profile.utility_company);
+      }
+    } catch (err) {
+      console.error('Error fetching user profile:', err);
+    }
+  };
+
   const fetchReports = async () => {
     try {
-      const { data: session } = await supabase.auth.getSession();
-      const utilityCompany = session?.session?.user?.user_metadata?.utility_company;
-
-      if (!utilityCompany) return;
-
       const { data, error } = await supabase
         .from('reports')
-        .select('*')
-        .eq('utility_company', utilityCompany)
+        .select('*, categories(name)')
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -62,13 +79,16 @@ const ReportsPage: React.FC = () => {
 
       if (error) throw error;
 
-      const report = reports.find((r) => r.id === reportId);
-      if (report) {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const userId = sessionData?.session?.user?.id;
+
+      if (userId) {
         const { error: woError } = await supabase.from('work_orders').insert({
           report_id: reportId,
           errand_id: null,
+          created_by: userId,
           status: 'open',
-          utility_company: report.category,
+          utility_company: userUtilityCompany,
           estimated_resolution_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
         });
 

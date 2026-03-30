@@ -55,25 +55,48 @@ const AdminPage: React.FC = () => {
       const [
         { data: reportsData },
         { data: errandsData },
-        { data: usersData },
         { data: categoriesData },
       ] = await Promise.all([
         supabase.from('reports').select('*').order('created_at', { ascending: false }),
         supabase.from('errands').select('*').order('created_at', { ascending: false }),
-        supabase.auth.admin.listUsers(),
         supabase.from('categories').select('*'),
       ]);
 
+      // Fetch users via Edge Function (avoids needing service role key client-side)
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+      let usersResult: User[] = [];
+
+      if (accessToken) {
+        try {
+          const response = await fetch(
+            `${import.meta.env.VITE_SUPABASE_URL || 'https://wowyavzbcmegwqnmulff.supabase.co'}/functions/v1/get-users`,
+            {
+              method: 'GET',
+              headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indvd3lhdnpiY21lZ3dxbm11bGZmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ3OTM3OTUsImV4cCI6MjA5MDM2OTc5NX0.np2MY9MaCNXZoGawIV4zWmCeyQgLJs1tX6n2fUwsYKo',
+                'Content-Type': 'application/json',
+              },
+            }
+          );
+          if (response.ok) {
+            const data = await response.json();
+            usersResult = (data.users || []).map((u: any) => ({
+              id: u.id,
+              email: u.email,
+              role: u.role || 'unknown',
+              utility_company: u.utility_company || 'N/A',
+            }));
+          }
+        } catch (fetchErr) {
+          console.error('Error fetching users from Edge Function:', fetchErr);
+        }
+      }
+
       setReports((reportsData || []) as Report[]);
       setErrands((errandsData || []) as Errand[]);
-      setUsers(
-        usersData?.users?.map((u: any) => ({
-          id: u.id,
-          email: u.email,
-          role: u.user_metadata?.role || 'unknown',
-          utility_company: u.user_metadata?.utility_company || 'N/A',
-        })) || []
-      );
+      setUsers(usersResult);
       setCategories((categoriesData || []) as Category[]);
     } catch (err) {
       console.error('Error fetching admin data:', err);
@@ -338,6 +361,7 @@ const AdminPage: React.FC = () => {
                   </table>
                 </div>
               )}
+            </div>
           )}
 
           {tab === 'categories' && (

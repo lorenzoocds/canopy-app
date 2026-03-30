@@ -33,12 +33,15 @@ const ErrandsPage: React.FC = () => {
     itemDescription: '',
     quantity: 1,
     pickupAddress: '',
+    pickupLatitude: '',
+    pickupLongitude: '',
     pickupWindowStart: '',
     pickupWindowEnd: '',
     pickupInstructions: '',
     dropoffAddress: '',
+    dropoffLatitude: '',
+    dropoffLongitude: '',
     dropoffInstructions: '',
-    payoutAmount: 15,
   });
 
   useEffect(() => {
@@ -47,15 +50,9 @@ const ErrandsPage: React.FC = () => {
 
   const fetchErrands = async () => {
     try {
-      const { data: session } = await supabase.auth.getSession();
-      const utilityCompany = session?.session?.user?.user_metadata?.utility_company;
-
-      if (!utilityCompany) return;
-
       const { data, error } = await supabase
         .from('errands')
         .select('*')
-        .eq('utility_company', utilityCompany)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -67,13 +64,32 @@ const ErrandsPage: React.FC = () => {
     }
   };
 
-  const calculateMileDistance = (): number => {
-    return Math.floor(Math.random() * 20) + 1;
+  const haversineDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+    const R = 3958.8; // Earth's radius in miles
+    const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLon = ((lon2 - lon1) * Math.PI) / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos((lat1 * Math.PI) / 180) *
+        Math.cos((lat2 * Math.PI) / 180) *
+        Math.sin(dLon / 2) *
+        Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
   };
 
-  const calculatePayout = (baseAmount: number): number => {
-    const miles = calculateMileDistance();
-    return baseAmount + miles * 0.5;
+  const getDistanceMiles = (): number => {
+    const pLat = parseFloat(formData.pickupLatitude);
+    const pLng = parseFloat(formData.pickupLongitude);
+    const dLat = parseFloat(formData.dropoffLatitude);
+    const dLng = parseFloat(formData.dropoffLongitude);
+    if (isNaN(pLat) || isNaN(pLng) || isNaN(dLat) || isNaN(dLng)) return 0;
+    return haversineDistance(pLat, pLng, dLat, dLng);
+  };
+
+  const calculatePayout = (): number => {
+    const miles = getDistanceMiles();
+    return Math.round((15 + miles * 0.5) * 100) / 100; // base $15 + $0.50/mile, rounded to 2 decimals
   };
 
   const validateForm = (): boolean => {
@@ -83,10 +99,13 @@ const ErrandsPage: React.FC = () => {
     if (!formData.itemDescription.trim()) errors.itemDescription = 'Item description is required';
     if (formData.quantity <= 0) errors.quantity = 'Quantity must be greater than 0';
     if (!formData.pickupAddress.trim()) errors.pickupAddress = 'Pickup address is required';
+    if (!formData.pickupLatitude || isNaN(parseFloat(formData.pickupLatitude))) errors.pickupLatitude = 'Valid pickup latitude is required';
+    if (!formData.pickupLongitude || isNaN(parseFloat(formData.pickupLongitude))) errors.pickupLongitude = 'Valid pickup longitude is required';
     if (!formData.pickupWindowStart) errors.pickupWindowStart = 'Pickup window start is required';
     if (!formData.pickupWindowEnd) errors.pickupWindowEnd = 'Pickup window end is required';
     if (!formData.dropoffAddress.trim()) errors.dropoffAddress = 'Dropoff address is required';
-    if (formData.payoutAmount <= 0) errors.payoutAmount = 'Payout amount must be greater than 0';
+    if (!formData.dropoffLatitude || isNaN(parseFloat(formData.dropoffLatitude))) errors.dropoffLatitude = 'Valid dropoff latitude is required';
+    if (!formData.dropoffLongitude || isNaN(parseFloat(formData.dropoffLongitude))) errors.dropoffLongitude = 'Valid dropoff longitude is required';
 
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
@@ -95,25 +114,31 @@ const ErrandsPage: React.FC = () => {
   const handleConfirmSubmitErrand = async () => {
     try {
       const { data: session } = await supabase.auth.getSession();
-      const utilityCompany = session?.session?.user?.user_metadata?.utility_company;
+      const userId = session?.session?.user?.id;
 
-      if (!utilityCompany) return;
+      if (!userId) return;
 
-      const payout = calculatePayout(formData.payoutAmount);
+      const distanceMiles = getDistanceMiles();
+      const payout = calculatePayout();
 
       const { error } = await supabase.from('errands').insert({
+        posted_by: userId,
         title: formData.title,
         item_description: formData.itemDescription,
-        quantity: formData.quantity,
+        item_quantity: formData.quantity,
         pickup_address: formData.pickupAddress,
+        pickup_latitude: parseFloat(formData.pickupLatitude),
+        pickup_longitude: parseFloat(formData.pickupLongitude),
         pickup_window_start: formData.pickupWindowStart,
         pickup_window_end: formData.pickupWindowEnd,
         pickup_instructions: formData.pickupInstructions,
         dropoff_address: formData.dropoffAddress,
+        dropoff_latitude: parseFloat(formData.dropoffLatitude),
+        dropoff_longitude: parseFloat(formData.dropoffLongitude),
         dropoff_instructions: formData.dropoffInstructions,
+        distance_miles: Math.round(distanceMiles * 100) / 100,
         payout_amount: payout,
-        status: 'posted',
-        utility_company: utilityCompany,
+        status: 'open',
       });
 
       if (error) throw error;
@@ -126,12 +151,15 @@ const ErrandsPage: React.FC = () => {
         itemDescription: '',
         quantity: 1,
         pickupAddress: '',
+        pickupLatitude: '',
+        pickupLongitude: '',
         pickupWindowStart: '',
         pickupWindowEnd: '',
         pickupInstructions: '',
         dropoffAddress: '',
+        dropoffLatitude: '',
+        dropoffLongitude: '',
         dropoffInstructions: '',
-        payoutAmount: 15,
       });
       setFormErrors({});
     } catch (err) {
@@ -260,6 +288,35 @@ const ErrandsPage: React.FC = () => {
 
               <div style={styles.twoColumn}>
                 <div style={styles.formGroup}>
+                  <label style={styles.label}>Pickup Latitude</label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={formData.pickupLatitude}
+                    onChange={(e) => setFormData({ ...formData, pickupLatitude: e.target.value })}
+                    placeholder="e.g. 36.1627"
+                    required
+                    style={{...styles.input, ...(formErrors.pickupLatitude ? styles.inputError : {})}}
+                  />
+                  {formErrors.pickupLatitude && <span style={styles.errorMessage}>{formErrors.pickupLatitude}</span>}
+                </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Pickup Longitude</label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={formData.pickupLongitude}
+                    onChange={(e) => setFormData({ ...formData, pickupLongitude: e.target.value })}
+                    placeholder="e.g. -86.7816"
+                    required
+                    style={{...styles.input, ...(formErrors.pickupLongitude ? styles.inputError : {})}}
+                  />
+                  {formErrors.pickupLongitude && <span style={styles.errorMessage}>{formErrors.pickupLongitude}</span>}
+                </div>
+              </div>
+
+              <div style={styles.twoColumn}>
+                <div style={styles.formGroup}>
                   <label style={styles.label}>Pickup Window Start</label>
                   <input
                     type="datetime-local"
@@ -301,6 +358,35 @@ const ErrandsPage: React.FC = () => {
                 />
               </div>
 
+              <div style={styles.twoColumn}>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Dropoff Latitude</label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={formData.dropoffLatitude}
+                    onChange={(e) => setFormData({ ...formData, dropoffLatitude: e.target.value })}
+                    placeholder="e.g. 36.1745"
+                    required
+                    style={{...styles.input, ...(formErrors.dropoffLatitude ? styles.inputError : {})}}
+                  />
+                  {formErrors.dropoffLatitude && <span style={styles.errorMessage}>{formErrors.dropoffLatitude}</span>}
+                </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Dropoff Longitude</label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={formData.dropoffLongitude}
+                    onChange={(e) => setFormData({ ...formData, dropoffLongitude: e.target.value })}
+                    placeholder="e.g. -86.7679"
+                    required
+                    style={{...styles.input, ...(formErrors.dropoffLongitude ? styles.inputError : {})}}
+                  />
+                  {formErrors.dropoffLongitude && <span style={styles.errorMessage}>{formErrors.dropoffLongitude}</span>}
+                </div>
+              </div>
+
               <div style={styles.formGroup}>
                 <label style={styles.label}>Dropoff Instructions</label>
                 <textarea
@@ -311,16 +397,15 @@ const ErrandsPage: React.FC = () => {
               </div>
 
               <div style={styles.formGroup}>
-                <label style={styles.label}>Base Payout Amount</label>
-                <input
-                  type="number"
-                  value={formData.payoutAmount}
-                  onChange={(e) => setFormData({ ...formData, payoutAmount: parseFloat(e.target.value) })}
-                  step="0.01"
-                  required
-                  style={styles.input}
-                />
-                <p style={styles.hint}>Base $15 + $0.50 per mile. Suggested: ${calculatePayout(formData.payoutAmount).toFixed(2)}</p>
+                <label style={styles.label}>Calculated Distance &amp; Payout</label>
+                <div style={styles.calculatedInfo}>
+                  <p style={styles.hint}>
+                    Distance: {getDistanceMiles() > 0 ? `${getDistanceMiles().toFixed(2)} miles` : 'Enter coordinates above'}
+                  </p>
+                  <p style={{...styles.hint, fontWeight: '600', color: '#388e3c'}}>
+                    Payout: ${calculatePayout().toFixed(2)} (base $15.00 + $0.50/mile)
+                  </p>
+                </div>
               </div>
 
               <button type="submit" style={styles.submitButton}>
@@ -336,7 +421,9 @@ const ErrandsPage: React.FC = () => {
           <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
             <h2 style={styles.modalTitle}>Confirm Errand</h2>
             <p style={styles.confirmText}>Are you sure you want to post this errand?</p>
-            <p style={styles.payoutText}>Estimated Payout: ${calculatePayout(formData.payoutAmount).toFixed(2)}</p>
+            <p style={styles.payoutText}>
+              Distance: {getDistanceMiles().toFixed(2)} miles | Payout: ${calculatePayout().toFixed(2)}
+            </p>
             <div style={styles.modalActions}>
               <button onClick={() => setShowConfirmation(false)} style={styles.cancelButton}>
                 Cancel
@@ -566,6 +653,12 @@ const styles: Record<string, React.CSSProperties> = {
     margin: '4px 0 0 0',
     fontSize: '12px',
     color: '#666',
+  },
+  calculatedInfo: {
+    padding: '12px',
+    backgroundColor: '#f5f5f5',
+    borderRadius: '4px',
+    border: '1px solid #ddd',
   },
   submitButton: {
     padding: '12px',
