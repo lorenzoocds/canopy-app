@@ -105,6 +105,18 @@ function getPriorityColor(label: string) {
 }
 
 /* ═══════════════════════════════════════════════════════════════════
+   Category Placeholders (when no photo is available)
+   ═══════════════════════════════════════════════════════════════════ */
+const CATEGORY_PLACEHOLDER: Record<string, { icon: string; bg: string; text: string }> = {
+  'Pothole': { icon: '🕳️', bg: '#fff3e0', text: '#e65100' },
+  'Street Light Out': { icon: '💡', bg: '#fffde7', text: '#f57f17' },
+  'Storm Damage': { icon: '🌧️', bg: '#e3f2fd', text: '#0d47a1' },
+  'Downed Branch': { icon: '🌳', bg: '#e8f5e9', text: '#2e7d32' },
+  'Power Line Hazard': { icon: '⚡', bg: '#fce4ec', text: '#c62828' },
+  'Other': { icon: '📋', bg: '#f5f5f5', text: '#616161' },
+};
+
+/* ═══════════════════════════════════════════════════════════════════
    Status Pipeline
    ═══════════════════════════════════════════════════════════════════ */
 const STATUS_PIPELINE = [
@@ -589,18 +601,27 @@ const ReportsPage: React.FC = () => {
                 </div>
               )}
 
-              {/* Photo */}
+              {/* Photo / Placeholder */}
               {selectedReport.photo_url ? (
                 <div style={{ marginBottom: '16px' }}>
                   <p style={S.secLabel}>Photo</p>
                   <img src={selectedReport.photo_url} alt="Report" style={{ width: '100%', maxHeight: '260px', objectFit: 'cover', borderRadius: '6px' }} />
                 </div>
               ) : (
-                <div style={{ padding: '16px', backgroundColor: '#fafafa', borderRadius: '6px', border: '1px dashed #ddd', textAlign: 'center', marginBottom: '16px' }}>
-                  <span style={{ fontSize: '18px' }}>📷</span>
-                  <p style={{ margin: '4px 0 0', color: '#999', fontSize: '12px' }}>
-                    {selectedReport.source === '311_nyc' ? 'NYC 311 reports do not include photos' : 'No photo attached'}
-                  </p>
+                <div style={{
+                  marginBottom: '16px', borderRadius: '8px', overflow: 'hidden',
+                  background: CATEGORY_PLACEHOLDER[selectedReport.categories?.name || '']?.bg || '#e2e3e5',
+                  padding: '28px 16px', textAlign: 'center',
+                }}>
+                  <div style={{ fontSize: '48px', marginBottom: '8px' }}>
+                    {CATEGORY_PLACEHOLDER[selectedReport.categories?.name || '']?.icon || '📋'}
+                  </div>
+                  <div style={{ fontSize: '16px', fontWeight: '700', color: CATEGORY_PLACEHOLDER[selectedReport.categories?.name || '']?.text || '#555' }}>
+                    {selectedReport.categories?.name || 'Report'}
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#888', marginTop: '4px' }}>
+                    {selectedReport.source === '311_nyc' ? 'NYC 311 — no photo included' : 'No photo attached'}
+                  </div>
                 </div>
               )}
 

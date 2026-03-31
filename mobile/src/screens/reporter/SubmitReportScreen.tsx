@@ -4,6 +4,7 @@ import {
   ScrollView, Image, Alert, ActivityIndicator,
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
@@ -48,6 +49,17 @@ export default function SubmitReportScreen({ navigation }: any) {
     const photo = await cameraRef.current.takePictureAsync({ quality: 0.7, base64: false });
     setPhotoUri(photo.uri);
     setShowCamera(false);
+  };
+
+  const pickFromGallery = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      quality: 0.7,
+    });
+    if (!result.canceled && result.assets[0]) {
+      setPhotoUri(result.assets[0].uri);
+    }
   };
 
   const uploadPhoto = async (uri: string): Promise<string> => {
@@ -128,21 +140,30 @@ export default function SubmitReportScreen({ navigation }: any) {
       <Text style={styles.heading}>Report an Issue</Text>
 
       {/* Photo */}
-      <TouchableOpacity style={styles.photoBox} onPress={() => setShowCamera(true)}>
-        {photoUri ? (
-          <>
-            <Image source={{ uri: photoUri }} style={styles.photoPreview} />
+      {photoUri ? (
+        <View style={styles.photoBox}>
+          <Image source={{ uri: photoUri }} style={styles.photoPreview} />
+          <View style={styles.photoActions}>
             <TouchableOpacity style={styles.retakeButton} onPress={() => { setPhotoUri(null); setShowCamera(true); }}>
-              <Text style={styles.retakeButtonText}>Retake Photo</Text>
+              <Text style={styles.retakeButtonText}>📷 Retake</Text>
             </TouchableOpacity>
-          </>
-        ) : (
-          <View style={styles.photoPlaceholder}>
-            <Text style={styles.photoPlaceholderIcon}>📷</Text>
-            <Text style={styles.photoPlaceholderText}>Take a photo</Text>
+            <TouchableOpacity style={styles.retakeButton} onPress={() => { setPhotoUri(null); pickFromGallery(); }}>
+              <Text style={styles.retakeButtonText}>🖼️ Gallery</Text>
+            </TouchableOpacity>
           </View>
-        )}
-      </TouchableOpacity>
+        </View>
+      ) : (
+        <View style={styles.photoOptions}>
+          <TouchableOpacity style={styles.photoOptionBtn} onPress={() => setShowCamera(true)}>
+            <Text style={styles.photoOptionIcon}>📷</Text>
+            <Text style={styles.photoOptionLabel}>Take Photo</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.photoOptionBtn} onPress={pickFromGallery}>
+            <Text style={styles.photoOptionIcon}>🖼️</Text>
+            <Text style={styles.photoOptionLabel}>Choose from Gallery</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Address */}
       <View style={styles.addressBox}>
@@ -211,18 +232,24 @@ const styles = StyleSheet.create({
   heading: { fontSize: 24, fontWeight: '800', color: '#1a472a', marginBottom: 20 },
   photoBox: { borderRadius: 16, overflow: 'hidden', marginBottom: 16, height: 200 },
   photoPreview: { width: '100%', height: '100%' },
-  retakeButton: {
+  photoActions: {
     position: 'absolute', bottom: 12, right: 12,
+    flexDirection: 'row', gap: 8,
+  },
+  retakeButton: {
     backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8,
   },
   retakeButtonText: { color: '#fff', fontSize: 12, fontWeight: '700' },
-  photoPlaceholder: {
-    width: '100%', height: '100%', backgroundColor: '#e8efe8',
+  photoOptions: {
+    flexDirection: 'row', gap: 12, marginBottom: 16,
+  },
+  photoOptionBtn: {
+    flex: 1, height: 120, backgroundColor: '#e8efe8',
     justifyContent: 'center', alignItems: 'center', borderRadius: 16,
     borderWidth: 2, borderColor: '#c8d8c8', borderStyle: 'dashed',
   },
-  photoPlaceholderIcon: { fontSize: 40 },
-  photoPlaceholderText: { color: '#6b7c6b', marginTop: 8, fontWeight: '600' },
+  photoOptionIcon: { fontSize: 32 },
+  photoOptionLabel: { color: '#6b7c6b', marginTop: 6, fontWeight: '600', fontSize: 13 },
   addressBox: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff',
     borderRadius: 12, padding: 14, marginBottom: 16,
