@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { dispatchJob } from '../lib/dispatch';
 
@@ -17,7 +17,25 @@ interface Report {
   created_at: string;
   verified_at: string | null;
   work_order_created: boolean;
+  source?: string;
+  latitude?: number;
+  longitude?: number;
+  external_id?: string;
 }
+
+interface AnalyticsData {
+  todayCount: number;
+  yesterdayCount: number;
+  weeklyCount: number;
+  totalCount: number;
+  submittedCount: number;
+  verifiedCount: number;
+  rejectedCount: number;
+  avgVerificationTimeHours: number | null;
+  verificationRate: number;
+}
+
+const AUTO_REFRESH_INTERVAL = 5 * 60 * 1000; // 5 minutes
 
 const ReportsPage: React.FC = () => {
   const [reports, setReports] = useState<Report[]>([]);
@@ -31,12 +49,97 @@ const ReportsPage: React.FC = () => {
   const [dispatchEnabled, setDispatchEnabled] = useState(false);
   const [dispatchLoading, setDispatchLoading] = useState(false);
   const [dispatchResult, setDispatchResult] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastRefreshed, setLastRefreshed] = useState<Date>(new Date());
+  const [analytics, setAnalytics] = useState<AnalyticsData>({
+    todayCount: 0,
+    yesterdayCount: 0,
+    weeklyCount: 0,
+    totalCount: 0,
+    submittedCount: 0,
+    verifiedCount: 0,
+    rejectedCount: 0,
+    avgVerificationTimeHours: null,
+    verificationRate: 0,
+  });
+  const autoRefreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const itemsPerPage = 10;
 
   useEffect(() => {
     fetchUserProfile();
     fetchReports();
+
+    // Auto-refresh every 5 minutes
+    autoRefreshRef.current = setInterval(() => {
+      fetchReports(true);
+    }, AUTO_REFRESH_INTERVAL);
+
+    return () => {
+      if (autoRefreshRef.current) {
+        clearInterval(autoRefreshRef.current);
+      }
+    };
   }, []);
+
+  // Recalculate analytics whenever reports change
+  useEffect(() => {
+    calculateAnalytics(reports);
+  }, [reports]);
+
+  const calculateAnalytics = (reportData: Report[]) => {
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const yesterdayStart = new Date(todayStart);
+    yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+    const weekStart = new Date(todayStart);
+    weekStart.setDate(weekStart.getDate() - 7);
+
+    const todayCount = reportData.filter(
+      (r) => new Date(r.created_at) >= todayStart
+    ).length;
+    const yesterdayCount = reportData.filter(
+      (r) => {
+        const d = new Date(r.created_at);
+        return d >= yesterdayStart && d < todayStart;
+      }
+    ).length;
+    const weeklyCount = reportData.filter(
+      (r) => new Date(r.created_at) >= weekStart
+    ).length;
+
+    const submittedCount = reportData.filter((r) => r.status === 'submitted').length;
+    const verifiedCount = reportData.filter((r) => r.status === 'verified').length;
+    const rejectedCount = reportData.filter((r) => r.status === 'rejected').length;
+
+    // Average verification time (for reports that have verified_at)
+    const verifiedReports = reportData.filter((r) => r.verified_at && r.created_at);
+    let avgVerificationTimeHours: number | null = null;
+    if (verifiedReports.length > 0) {
+      const totalHours = verifiedReports.reduce((sum, r) => {
+        const created = new Date(r.created_at).getTime();
+        const verified = new Date(r.verified_at!).getTime();
+        return sum + (verified - created) / (1000 * 60 * 60);
+      }, 0);
+      avgVerificationTimeHours = Math.round((totalHours / verifiedReports.length) * 10) / 10;
+    }
+
+    const totalWithDecision = verifiedCount + rejectedCount;
+    const verificationRate = totalWithDecision > 0
+      ? Math.round((verifiedCount / totalWithDecision) * 100)
+      : 0;
+
+    setAnalytics({
+      todayCount,
+      yesterdayCount,
+      weeklyCount,
+      totalCount: reportData.length,
+      submittedCount,
+      verifiedCount,
+      rejectedCount,
+      avgVerificationTimeHours,
+      verificationRate,
+    });
+  };
 
   const fetchUserProfile = async () => {
     try {
@@ -59,8 +162,9 @@ const ReportsPage: React.FC = () => {
     }
   };
 
-  const fetchReports = async () => {
+  const fetchReports = async (silent = false) => {
     try {
+      if (!silent) setLoading(true);
       const { data, error } = await supabase
         .from('reports')
         .select('*, categories(name)')
@@ -68,12 +172,33 @@ const ReportsPage: React.FC = () => {
 
       if (error) throw error;
       setReports(data as Report[]);
+      setLastRefreshed(new Date());
     } catch (err) {
       console.error('Error fetching reports:', err);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
+
+  const handleManualRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      // First, trigger the ingest edge function to pull latest NYC 311 data
+      const response = await fetch(
+        'https://wowyavzbcmegwqnmulff.supabase.co/functions/v1/ingest-311-nyc',
+        { method: 'POST' }
+      );
+      if (!response.ok) {
+        console.warn('Ingest function returned:', response.status);
+      }
+      // Then re-fetch reports from the database
+      await fetchReports(true);
+    } catch (err) {
+      console.error('Error during manual refresh:', err);
+    } finally {
+      setRefreshing(false);
+    }
+  }, []);
 
   const handleCreateWorkOrder = async (reportId: string) => {
     try {
@@ -109,11 +234,11 @@ const ReportsPage: React.FC = () => {
           jobType: 'verify',
           reportId: reportId,
           pickupAddress: selectedReport.address || '',
-          pickupLat: 0, // Will use address-based lookup in production
-          pickupLng: 0,
+          pickupLat: selectedReport.latitude || 0,
+          pickupLng: selectedReport.longitude || 0,
           dropoffAddress: selectedReport.address || '',
-          dropoffLat: 0,
-          dropoffLng: 0,
+          dropoffLat: selectedReport.latitude || 0,
+          dropoffLng: selectedReport.longitude || 0,
           taskDescription: `Verify reported ${selectedReport.category} at ${selectedReport.address}`,
           payoutAmount: 7.00,
         });
@@ -154,7 +279,7 @@ const ReportsPage: React.FC = () => {
 
   const filteredReports = reports.filter((r) => {
     if (statusFilter && r.status !== statusFilter) return false;
-    if (sourceFilter && (r as any).source !== sourceFilter) return false;
+    if (sourceFilter && r.source !== sourceFilter) return false;
     return true;
   });
 
@@ -170,7 +295,7 @@ const ReportsPage: React.FC = () => {
       new Date(r.created_at).toLocaleDateString(),
       r.category,
       r.address,
-      (r as any).source || 'canopy_app',
+      r.source || 'canopy_app',
       r.status,
       `$${r.bounty_amount}`,
       r.notes,
@@ -190,8 +315,64 @@ const ReportsPage: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
+  const formatTimeAgo = (date: Date) => {
+    const seconds = Math.floor((new Date().getTime() - date.getTime()) / 1000);
+    if (seconds < 60) return 'just now';
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    return `${hours}h ago`;
+  };
+
   return (
     <div style={styles.container}>
+      {/* Analytics Bar */}
+      <div style={styles.analyticsBar}>
+        <div style={styles.metricCard}>
+          <div style={styles.metricValue}>{analytics.todayCount}</div>
+          <div style={styles.metricLabel}>Today</div>
+        </div>
+        <div style={styles.metricCard}>
+          <div style={styles.metricValue}>{analytics.yesterdayCount}</div>
+          <div style={styles.metricLabel}>Yesterday</div>
+        </div>
+        <div style={styles.metricCard}>
+          <div style={styles.metricValue}>{analytics.weeklyCount}</div>
+          <div style={styles.metricLabel}>This Week</div>
+        </div>
+        <div style={styles.metricCard}>
+          <div style={styles.metricValue}>{analytics.totalCount}</div>
+          <div style={styles.metricLabel}>Total</div>
+        </div>
+        <div style={styles.metricDivider} />
+        <div style={styles.metricCard}>
+          <div style={{ ...styles.metricValue, color: '#856404' }}>{analytics.submittedCount}</div>
+          <div style={styles.metricLabel}>Pending</div>
+        </div>
+        <div style={styles.metricCard}>
+          <div style={{ ...styles.metricValue, color: '#155724' }}>{analytics.verifiedCount}</div>
+          <div style={styles.metricLabel}>Verified</div>
+        </div>
+        <div style={styles.metricCard}>
+          <div style={{ ...styles.metricValue, color: '#721c24' }}>{analytics.rejectedCount}</div>
+          <div style={styles.metricLabel}>Rejected</div>
+        </div>
+        <div style={styles.metricDivider} />
+        <div style={styles.metricCard}>
+          <div style={styles.metricValue}>{analytics.verificationRate}%</div>
+          <div style={styles.metricLabel}>Approval Rate</div>
+        </div>
+        <div style={styles.metricCard}>
+          <div style={styles.metricValue}>
+            {analytics.avgVerificationTimeHours !== null
+              ? `${analytics.avgVerificationTimeHours}h`
+              : '—'}
+          </div>
+          <div style={styles.metricLabel}>Avg Verify Time</div>
+        </div>
+      </div>
+
+      {/* Header with filters and refresh */}
       <div style={styles.header}>
         <h1 style={styles.title}>Reports</h1>
         <div style={styles.headerActions}>
@@ -226,8 +407,22 @@ const ReportsPage: React.FC = () => {
             <option value="verified">Verified</option>
             <option value="rejected">Rejected</option>
           </select>
+          <button
+            onClick={handleManualRefresh}
+            disabled={refreshing}
+            style={{
+              ...styles.refreshButton,
+              opacity: refreshing ? 0.6 : 1,
+              cursor: refreshing ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {refreshing ? '↻ Refreshing...' : '↻ Refresh Data'}
+          </button>
+          <span style={styles.lastRefreshed}>
+            Updated {formatTimeAgo(lastRefreshed)}
+          </span>
           <button onClick={exportToCSV} style={styles.exportButton}>
-            Export to CSV
+            Export CSV
           </button>
         </div>
       </div>
@@ -255,66 +450,74 @@ const ReportsPage: React.FC = () => {
               </thead>
               <tbody>
                 {paginatedReports.map((report) => (
-                <tr
-                  key={report.id}
-                  style={styles.row}
-                  onClick={() => {
-                    setSelectedReport(report);
-                    setShowModal(true);
-                  }}
-                >
-                  <td style={styles.td}>{new Date(report.created_at).toLocaleDateString()}</td>
-                  <td style={styles.td}>{report.category}</td>
-                  <td style={styles.td}>{report.address}</td>
-                  <td style={styles.td}>
-                    <span style={{
-                      ...styles.sourceBadge,
-                      ...((report as any).source === '311_nyc'
-                        ? { backgroundColor: '#e3f2fd', color: '#0d47a1' }
-                        : { backgroundColor: '#e8f5e9', color: '#2e7d32' }),
-                    }}>
-                      {(report as any).source === '311_nyc' ? 'NYC 311' : 'Canopy'}
-                    </span>
-                  </td>
-                  <td style={styles.td}>
-                    <span style={{ ...styles.badge, ...getStatusBadgeColor(report.status) }}>
-                      {report.status}
-                    </span>
-                  </td>
-                  <td style={styles.td}>${report.bounty_amount}</td>
-                  <td style={styles.td}>
-                    <button onClick={() => {}} style={styles.actionButton}>
-                      View
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  <tr
+                    key={report.id}
+                    style={styles.row}
+                    onClick={() => {
+                      setSelectedReport(report);
+                      setShowModal(true);
+                      setDispatchResult(null);
+                    }}
+                  >
+                    <td style={styles.td}>{new Date(report.created_at).toLocaleDateString()}</td>
+                    <td style={styles.td}>{report.category}</td>
+                    <td style={styles.td}>{report.address}</td>
+                    <td style={styles.td}>
+                      <span style={{
+                        ...styles.sourceBadge,
+                        ...(report.source === '311_nyc'
+                          ? { backgroundColor: '#e3f2fd', color: '#0d47a1' }
+                          : { backgroundColor: '#e8f5e9', color: '#2e7d32' }),
+                      }}>
+                        {report.source === '311_nyc' ? 'NYC 311' : 'Canopy'}
+                      </span>
+                    </td>
+                    <td style={styles.td}>
+                      <span style={{ ...styles.badge, ...getStatusBadgeColor(report.status) }}>
+                        {report.status}
+                      </span>
+                    </td>
+                    <td style={styles.td}>${report.bounty_amount}</td>
+                    <td style={styles.td}>
+                      <button onClick={(e) => { e.stopPropagation(); setSelectedReport(report); setShowModal(true); }} style={styles.actionButton}>
+                        View
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
 
-          <div style={styles.pagination}>
-            <button
-              onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-              disabled={currentPage === 1}
-              style={styles.paginationButton}
-            >
-              Previous
-            </button>
-            <span style={styles.pageInfo}>
-              Page {currentPage} of {totalPages}
-            </span>
-            <button
-              onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
-              disabled={currentPage === totalPages}
-              style={styles.paginationButton}
-            >
-              Next
-            </button>
+            <div style={styles.pagination}>
+              <button
+                onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                disabled={currentPage === 1}
+                style={{
+                  ...styles.paginationButton,
+                  ...(currentPage === 1 ? { opacity: 0.5, cursor: 'not-allowed' } : {}),
+                }}
+              >
+                Previous
+              </button>
+              <span style={styles.pageInfo}>
+                Page {currentPage} of {totalPages}
+              </span>
+              <button
+                onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+                disabled={currentPage === totalPages}
+                style={{
+                  ...styles.paginationButton,
+                  ...(currentPage === totalPages ? { opacity: 0.5, cursor: 'not-allowed' } : {}),
+                }}
+              >
+                Next
+              </button>
+            </div>
           </div>
-        </div>
         </>
       )}
 
+      {/* Report Detail Modal */}
       {showModal && selectedReport && (
         <div style={styles.modalOverlay} onClick={() => setShowModal(false)}>
           <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
@@ -324,53 +527,121 @@ const ReportsPage: React.FC = () => {
             <h2 style={styles.modalTitle}>Report Details</h2>
 
             <div style={styles.modalContent}>
+              {/* Map Section */}
+              {selectedReport.latitude && selectedReport.longitude && (
+                <div style={styles.mapSection}>
+                  <p style={styles.sectionLabel}>Location</p>
+                  <iframe
+                    title="Report Location"
+                    width="100%"
+                    height="250"
+                    style={{ border: 'none', borderRadius: '6px' }}
+                    src={`https://www.openstreetmap.org/export/embed.html?bbox=${selectedReport.longitude - 0.005},${selectedReport.latitude - 0.003},${selectedReport.longitude + 0.005},${selectedReport.latitude + 0.003}&layer=mapnik&marker=${selectedReport.latitude},${selectedReport.longitude}`}
+                  />
+                  <a
+                    href={`https://www.openstreetmap.org/?mlat=${selectedReport.latitude}&mlon=${selectedReport.longitude}#map=17/${selectedReport.latitude}/${selectedReport.longitude}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={styles.mapLink}
+                  >
+                    Open in full map ↗
+                  </a>
+                </div>
+              )}
+
+              {/* Photo Section */}
               <div style={styles.photoSection}>
                 {selectedReport.reporter_photo_url && (
                   <div style={styles.photoBox}>
-                    <p style={styles.photoLabel}>Reporter</p>
+                    <p style={styles.photoLabel}>Reporter Photo</p>
                     <img
                       src={selectedReport.reporter_photo_url}
-                      alt="Reporter"
+                      alt="Reporter submission"
                       style={styles.photo}
                     />
                   </div>
                 )}
                 {selectedReport.verifier_photo_url && selectedReport.status === 'verified' && (
                   <div style={styles.photoBox}>
-                    <p style={styles.photoLabel}>Verifier</p>
+                    <p style={styles.photoLabel}>Verifier Photo</p>
                     <img
                       src={selectedReport.verifier_photo_url}
-                      alt="Verifier"
+                      alt="Verifier confirmation"
                       style={styles.photo}
                     />
                   </div>
                 )}
+                {!selectedReport.reporter_photo_url && !selectedReport.verifier_photo_url && (
+                  <div style={styles.noPhotos}>
+                    <span style={{ fontSize: '24px' }}>📷</span>
+                    <p style={{ margin: '4px 0 0 0', color: '#999', fontSize: '13px' }}>
+                      {selectedReport.source === '311_nyc'
+                        ? 'NYC 311 reports do not include photos'
+                        : 'No photos attached to this report'}
+                    </p>
+                  </div>
+                )}
               </div>
 
+              {/* Details */}
               <div style={styles.details}>
-                <p>
-                  <strong>Category:</strong> {selectedReport.category}
-                </p>
-                <p>
-                  <strong>Address:</strong> {selectedReport.address}
-                </p>
-                <p>
-                  <strong>Status:</strong> {selectedReport.status}
-                </p>
-                <p>
-                  <strong>Bounty:</strong> ${selectedReport.bounty_amount}
-                </p>
-                <p>
-                  <strong>Submitted:</strong> {new Date(selectedReport.created_at).toLocaleString()}
-                </p>
+                <div style={styles.detailRow}>
+                  <span style={styles.detailLabel}>Category</span>
+                  <span>{selectedReport.category}</span>
+                </div>
+                <div style={styles.detailRow}>
+                  <span style={styles.detailLabel}>Address</span>
+                  <span>{selectedReport.address}</span>
+                </div>
+                <div style={styles.detailRow}>
+                  <span style={styles.detailLabel}>Source</span>
+                  <span style={{
+                    ...styles.sourceBadge,
+                    ...(selectedReport.source === '311_nyc'
+                      ? { backgroundColor: '#e3f2fd', color: '#0d47a1' }
+                      : { backgroundColor: '#e8f5e9', color: '#2e7d32' }),
+                  }}>
+                    {selectedReport.source === '311_nyc' ? 'NYC 311' : 'Canopy App'}
+                  </span>
+                </div>
+                <div style={styles.detailRow}>
+                  <span style={styles.detailLabel}>Status</span>
+                  <span style={{ ...styles.badge, ...getStatusBadgeColor(selectedReport.status) }}>
+                    {selectedReport.status}
+                  </span>
+                </div>
+                <div style={styles.detailRow}>
+                  <span style={styles.detailLabel}>Bounty</span>
+                  <span>${selectedReport.bounty_amount}</span>
+                </div>
+                <div style={styles.detailRow}>
+                  <span style={styles.detailLabel}>Submitted</span>
+                  <span>{new Date(selectedReport.created_at).toLocaleString()}</span>
+                </div>
                 {selectedReport.verified_at && (
-                  <p>
-                    <strong>Verified:</strong> {new Date(selectedReport.verified_at).toLocaleString()}
-                  </p>
+                  <div style={styles.detailRow}>
+                    <span style={styles.detailLabel}>Verified</span>
+                    <span>{new Date(selectedReport.verified_at).toLocaleString()}</span>
+                  </div>
                 )}
-                <p>
-                  <strong>Notes:</strong> {selectedReport.notes}
-                </p>
+                {selectedReport.latitude && selectedReport.longitude && (
+                  <div style={styles.detailRow}>
+                    <span style={styles.detailLabel}>Coordinates</span>
+                    <span>{selectedReport.latitude.toFixed(5)}, {selectedReport.longitude.toFixed(5)}</span>
+                  </div>
+                )}
+                {selectedReport.notes && (
+                  <div style={styles.detailRow}>
+                    <span style={styles.detailLabel}>Notes</span>
+                    <span>{selectedReport.notes}</span>
+                  </div>
+                )}
+                {selectedReport.external_id && (
+                  <div style={styles.detailRow}>
+                    <span style={styles.detailLabel}>External ID</span>
+                    <span style={{ fontFamily: 'monospace', fontSize: '12px' }}>{selectedReport.external_id}</span>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -404,15 +675,23 @@ const ReportsPage: React.FC = () => {
                 <button
                   onClick={() => handleCreateWorkOrder(selectedReport.id)}
                   disabled={dispatchLoading}
-                  style={{...styles.actionBtn, ...styles.primaryBtn, ...(dispatchLoading ? {opacity: 0.6} : {})}}
+                  style={{
+                    ...styles.actionBtn,
+                    ...styles.primaryBtn,
+                    ...(dispatchLoading ? { opacity: 0.6 } : {}),
+                  }}
                 >
-                  {dispatchLoading ? 'Dispatching...' : dispatchEnabled ? 'Create & Dispatch' : 'Create Work Order'}
+                  {dispatchLoading
+                    ? 'Dispatching...'
+                    : dispatchEnabled
+                    ? 'Create & Dispatch'
+                    : 'Create Work Order'}
                 </button>
               )}
               {selectedReport.status !== 'rejected' && (
                 <button
                   onClick={() => handleRejectReport(selectedReport.id)}
-                  style={{...styles.actionBtn, ...styles.dangerBtn}}
+                  style={{ ...styles.actionBtn, ...styles.dangerBtn }}
                 >
                   Reject Report
                 </button>
@@ -438,18 +717,57 @@ const styles: Record<string, React.CSSProperties> = {
   container: {
     padding: '30px',
   },
+  // Analytics bar
+  analyticsBar: {
+    display: 'flex',
+    gap: '0',
+    marginBottom: '24px',
+    backgroundColor: 'white',
+    borderRadius: '8px',
+    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+    padding: '16px 20px',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+  },
+  metricCard: {
+    flex: '1',
+    textAlign: 'center' as const,
+    minWidth: '80px',
+    padding: '4px 8px',
+  },
+  metricValue: {
+    fontSize: '24px',
+    fontWeight: 'bold',
+    color: '#1a472a',
+    lineHeight: '1.2',
+  },
+  metricLabel: {
+    fontSize: '11px',
+    color: '#888',
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.5px',
+    marginTop: '2px',
+  },
+  metricDivider: {
+    width: '1px',
+    height: '40px',
+    backgroundColor: '#e0e0e0',
+    margin: '0 8px',
+  },
+  // Header and filters
   header: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: '30px',
-    flexWrap: 'wrap',
-    gap: '16px',
+    marginBottom: '20px',
+    flexWrap: 'wrap' as const,
+    gap: '12px',
   },
   headerActions: {
     display: 'flex',
-    gap: '12px',
+    gap: '10px',
     alignItems: 'center',
+    flexWrap: 'wrap' as const,
   },
   sourceChips: {
     display: 'flex',
@@ -478,7 +796,7 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: '600',
   },
   filterSelect: {
-    padding: '10px 12px',
+    padding: '8px 12px',
     border: '1px solid #ddd',
     borderRadius: '4px',
     fontSize: '14px',
@@ -491,25 +809,41 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 'bold',
     color: '#333',
   },
+  refreshButton: {
+    padding: '8px 16px',
+    backgroundColor: '#2196f3',
+    color: 'white',
+    border: 'none',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    fontSize: '13px',
+    fontWeight: '500',
+  },
+  lastRefreshed: {
+    fontSize: '12px',
+    color: '#999',
+    whiteSpace: 'nowrap' as const,
+  },
   exportButton: {
-    padding: '10px 16px',
+    padding: '8px 16px',
     backgroundColor: '#1a472a',
     color: 'white',
     border: 'none',
     borderRadius: '4px',
     cursor: 'pointer',
-    fontSize: '14px',
+    fontSize: '13px',
     fontWeight: '500',
   },
+  // Table
   tableWrapper: {
     backgroundColor: 'white',
     borderRadius: '8px',
     boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-    overflow: 'x',
+    overflow: 'hidden',
   },
   table: {
     width: '100%',
-    borderCollapse: 'collapse',
+    borderCollapse: 'collapse' as const,
   },
   headerRow: {
     backgroundColor: '#f5f5f5',
@@ -517,14 +851,15 @@ const styles: Record<string, React.CSSProperties> = {
   },
   th: {
     padding: '12px',
-    textAlign: 'left',
+    textAlign: 'left' as const,
     fontWeight: '600',
     color: '#333',
     fontSize: '14px',
   },
   row: {
-    borderBottom: '1px solid #ddd',
+    borderBottom: '1px solid #eee',
     cursor: 'pointer',
+    transition: 'background-color 0.15s',
   },
   td: {
     padding: '12px',
@@ -547,8 +882,9 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
     fontSize: '12px',
   },
+  // Modal
   modalOverlay: {
-    position: 'fixed',
+    position: 'fixed' as const,
     top: 0,
     left: 0,
     right: 0,
@@ -563,14 +899,14 @@ const styles: Record<string, React.CSSProperties> = {
     backgroundColor: 'white',
     borderRadius: '8px',
     padding: '30px',
-    maxWidth: '600px',
+    maxWidth: '700px',
     width: '90%',
-    maxHeight: '80vh',
-    overflowY: 'auto',
-    position: 'relative',
+    maxHeight: '85vh',
+    overflowY: 'auto' as const,
+    position: 'relative' as const,
   },
   closeButton: {
-    position: 'absolute',
+    position: 'absolute' as const,
     top: '10px',
     right: '10px',
     backgroundColor: 'transparent',
@@ -588,9 +924,29 @@ const styles: Record<string, React.CSSProperties> = {
   modalContent: {
     marginBottom: '20px',
   },
+  // Map section
+  mapSection: {
+    marginBottom: '20px',
+  },
+  sectionLabel: {
+    margin: '0 0 8px 0',
+    fontSize: '12px',
+    fontWeight: '600',
+    color: '#666',
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.5px',
+  },
+  mapLink: {
+    display: 'inline-block',
+    marginTop: '6px',
+    fontSize: '12px',
+    color: '#2196f3',
+    textDecoration: 'none',
+  },
+  // Photo section
   photoSection: {
     display: 'flex',
-    gap: '20px',
+    gap: '16px',
     marginBottom: '20px',
   },
   photoBox: {
@@ -605,34 +961,35 @@ const styles: Record<string, React.CSSProperties> = {
   photo: {
     width: '100%',
     height: '200px',
-    objectFit: 'cover',
-    borderRadius: '4px',
+    objectFit: 'cover' as const,
+    borderRadius: '6px',
+    border: '1px solid #eee',
   },
+  noPhotos: {
+    width: '100%',
+    padding: '24px',
+    backgroundColor: '#fafafa',
+    borderRadius: '6px',
+    border: '1px dashed #ddd',
+    textAlign: 'center' as const,
+  },
+  // Detail rows
   details: {
     fontSize: '14px',
-    lineHeight: '1.6',
   },
-  modalActions: {
+  detailRow: {
     display: 'flex',
-    gap: '10px',
-    justifyContent: 'flex-end',
+    padding: '8px 0',
+    borderBottom: '1px solid #f0f0f0',
+    gap: '12px',
   },
-  actionBtn: {
-    padding: '10px 16px',
-    border: 'none',
-    borderRadius: '4px',
-    cursor: 'pointer',
-    fontSize: '14px',
-    fontWeight: '500',
+  detailLabel: {
+    fontWeight: '600',
+    color: '#666',
+    minWidth: '110px',
+    flexShrink: 0,
   },
-  primaryBtn: {
-    backgroundColor: '#388e3c',
-    color: 'white',
-  },
-  dangerBtn: {
-    backgroundColor: '#d32f2f',
-    color: 'white',
-  },
+  // Dispatch
   dispatchToggle: {
     padding: '12px',
     backgroundColor: '#f0f7f0',
@@ -670,13 +1027,36 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#2e7d32',
     marginBottom: '16px',
   },
+  modalActions: {
+    display: 'flex',
+    gap: '10px',
+    justifyContent: 'flex-end',
+  },
+  actionBtn: {
+    padding: '10px 16px',
+    border: 'none',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: '500',
+  },
+  primaryBtn: {
+    backgroundColor: '#388e3c',
+    color: 'white',
+  },
+  dangerBtn: {
+    backgroundColor: '#d32f2f',
+    color: 'white',
+  },
+  // Other
   loading: {
-    textAlign: 'center',
+    textAlign: 'center' as const,
     fontSize: '16px',
     color: '#666',
+    padding: '40px',
   },
   emptyState: {
-    textAlign: 'center',
+    textAlign: 'center' as const,
     padding: '40px',
     backgroundColor: 'white',
     borderRadius: '8px',
@@ -689,7 +1069,7 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: 'center',
     alignItems: 'center',
     gap: '16px',
-    marginTop: '20px',
+    padding: '16px',
   },
   paginationButton: {
     padding: '8px 16px',
@@ -705,7 +1085,7 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: '14px',
     color: '#666',
     minWidth: '120px',
-    textAlign: 'center',
+    textAlign: 'center' as const,
   },
 };
 
