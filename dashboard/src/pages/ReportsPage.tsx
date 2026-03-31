@@ -109,6 +109,7 @@ function getPriorityColor(label: string) {
    ═══════════════════════════════════════════════════════════════════ */
 const STATUS_PIPELINE = [
   { key: 'submitted', label: 'Submitted', color: '#ffc107', icon: '📋' },
+  { key: 'verification_in_progress', label: 'Verifying', color: '#fd7e14', icon: '🔍' },
   { key: 'verified', label: 'Verified', color: '#17a2b8', icon: '✓' },
   { key: 'dispatched', label: 'Dispatched', color: '#6f42c1', icon: '🚗' },
   { key: 'work_order_created', label: 'Work Order', color: '#007bff', icon: '🔧' },
@@ -692,6 +693,7 @@ const Th: React.FC<{
 function getStatusColor(status: string): { backgroundColor: string; color: string } {
   const m: Record<string, { backgroundColor: string; color: string }> = {
     submitted: { backgroundColor: '#fff3cd', color: '#856404' },
+    verification_in_progress: { backgroundColor: '#ffe0cc', color: '#e65100' },
     verified: { backgroundColor: '#d1ecf1', color: '#0c5460' },
     dispatched: { backgroundColor: '#e8daef', color: '#6c3483' },
     work_order_created: { backgroundColor: '#d6eaf8', color: '#1a5276' },
