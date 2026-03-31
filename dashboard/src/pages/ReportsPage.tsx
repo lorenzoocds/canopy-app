@@ -204,12 +204,6 @@ const ReportsPage: React.FC = () => {
   const totalPages = Math.ceil(sorted.length / PER_PAGE);
   const page = sorted.slice((currentPage - 1) * PER_PAGE, currentPage * PER_PAGE);
 
-  const categories = useMemo(() => {
-    const s = new Set<string>();
-    reports.forEach((r) => { if (r.categories?.name) s.add(r.categories.name); });
-    return Array.from(s).sort();
-  }, [reports]);
-
   /* ── Analytics ── */
   const calcAnalytics = (data: Report[]) => {
     const now = new Date();
@@ -338,8 +332,6 @@ const ReportsPage: React.FC = () => {
     }
     setCurrentPage(1);
   };
-
-  const sortArrow = (key: SortKey) => sortKey === key ? (sortDir === 'desc' ? ' ▼' : ' ▲') : '';
 
   /* ═══════════════════════════════════════════════════════════════
      RENDER
