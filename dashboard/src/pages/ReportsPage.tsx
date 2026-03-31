@@ -245,6 +245,9 @@ const ReportsPage: React.FC = () => {
   });
   const [expandedClusters, setExpandedClusters] = useState<Set<string>>(new Set());
   const [uploadingReportId, setUploadingReportId] = useState<string | null>(null);
+  const [showRejectForm, setShowRejectForm] = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
+  const [rejectNotes, setRejectNotes] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const autoRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -422,8 +425,16 @@ const ReportsPage: React.FC = () => {
   };
 
   const handleReject = async (id: string) => {
+    if (!rejectReason) return;
     try {
-      await supabase.from('reports').update({ status: 'rejected' }).eq('id', id);
+      await supabase.from('reports').update({
+        status: 'rejected',
+        rejection_reason: rejectReason,
+        rejection_notes: rejectNotes || null,
+      }).eq('id', id);
+      setRejectReason('');
+      setRejectNotes('');
+      setShowRejectForm(false);
       fetchReports();
       setShowModal(false);
     } catch (e) { console.error(e); }
@@ -917,9 +928,46 @@ const ReportsPage: React.FC = () => {
               </div>
             )}
 
+            {/* Rejection Form */}
+            {showRejectForm && (
+              <div style={{ padding: '16px', backgroundColor: '#fef2f2', borderRadius: '8px', border: '1px solid #fca5a5', marginBottom: '14px' }}>
+                <p style={{ margin: '0 0 10px', fontWeight: '600', color: '#991b1b', fontSize: '14px' }}>Reason for Rejection</p>
+                <select
+                  value={rejectReason}
+                  onChange={(e) => setRejectReason(e.target.value)}
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: '4px', border: '1px solid #ddd', fontSize: '14px', marginBottom: '10px', backgroundColor: '#fff' }}
+                >
+                  <option value="">Select a reason...</option>
+                  <option value="duplicate">Duplicate report</option>
+                  <option value="already_resolved">Already resolved</option>
+                  <option value="insufficient_info">Insufficient information</option>
+                  <option value="out_of_jurisdiction">Out of jurisdiction</option>
+                  <option value="not_actionable">Not actionable</option>
+                  <option value="false_report">False / spam report</option>
+                  <option value="other">Other</option>
+                </select>
+                <textarea
+                  value={rejectNotes}
+                  onChange={(e) => setRejectNotes(e.target.value)}
+                  placeholder="Additional notes (optional)..."
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: '4px', border: '1px solid #ddd', fontSize: '13px', minHeight: '60px', resize: 'vertical' as const, boxSizing: 'border-box' as const }}
+                />
+                <div style={{ display: 'flex', gap: '8px', marginTop: '10px', justifyContent: 'flex-end' }}>
+                  <button onClick={() => { setShowRejectForm(false); setRejectReason(''); setRejectNotes(''); }}
+                    style={{ padding: '8px 14px', border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', backgroundColor: '#fff', color: '#666' }}>
+                    Cancel
+                  </button>
+                  <button onClick={() => handleReject(selectedReport.id)} disabled={!rejectReason}
+                    style={{ padding: '8px 14px', border: 'none', borderRadius: '4px', cursor: rejectReason ? 'pointer' : 'not-allowed', fontSize: '13px', fontWeight: '600', backgroundColor: rejectReason ? '#d32f2f' : '#e0e0e0', color: '#fff' }}>
+                    Confirm Rejection
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Action Buttons */}
             <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-              {selectedReport.status === 'submitted' && (
+              {selectedReport.status === 'submitted' && !showRejectForm && (
                 <>
                   <button onClick={() => handleEscalateToVerification(selectedReport.id)} disabled={dispatchLoading}
                     style={{ padding: '10px 16px', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '14px', fontWeight: '500', backgroundColor: '#388e3c', color: '#fff', opacity: dispatchLoading ? 0.6 : 1 }}>
@@ -929,14 +977,14 @@ const ReportsPage: React.FC = () => {
                     style={{ padding: '10px 16px', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '14px', fontWeight: '500', backgroundColor: '#2196f3', color: '#fff', opacity: dispatchLoading ? 0.6 : 1 }}>
                     {dispatchLoading ? 'Processing...' : 'Upload Proof & Verify'}
                   </button>
-                  <button onClick={() => handleReject(selectedReport.id)}
+                  <button onClick={() => setShowRejectForm(true)}
                     style={{ padding: '10px 16px', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '14px', fontWeight: '500', backgroundColor: '#d32f2f', color: '#fff' }}>
                     Reject
                   </button>
                 </>
               )}
-              {selectedReport.status === 'verification_in_progress' && (
-                <button onClick={() => handleReject(selectedReport.id)}
+              {selectedReport.status === 'verification_in_progress' && !showRejectForm && (
+                <button onClick={() => setShowRejectForm(true)}
                   style={{ padding: '10px 16px', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '14px', fontWeight: '500', backgroundColor: '#d32f2f', color: '#fff' }}>
                   Reject
                 </button>
