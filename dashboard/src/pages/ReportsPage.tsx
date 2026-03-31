@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import type { CSSProperties } from 'react';
 import { supabase } from '../lib/supabase';
 import { dispatchJob } from '../lib/dispatch';
 
@@ -34,6 +35,15 @@ interface AnalyticsData {
   categoryBreakdown: { name: string; count: number }[];
 }
 
+interface ClusterGroup {
+  id: string;
+  category: string;
+  address: string;
+  reports: Report[];
+  maxScore: number;
+  expanded: boolean;
+}
+
 /* ═══════════════════════════════════════════════════════════════════
    Priority Engine
    ═══════════════════════════════════════════════════════════════════ */
@@ -44,6 +54,15 @@ const CATEGORY_SEVERITY: Record<string, number> = {
   'Downed Branch': 18,
   'Street Light Out': 15,
   'Other': 10,
+};
+
+const CATEGORY_IMAGES: Record<string, string> = {
+  'Pothole': 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?w=600&h=300&fit=crop',
+  'Street Light Out': 'https://images.unsplash.com/photo-1542332213-31f87348057f?w=600&h=300&fit=crop',
+  'Storm Damage': 'https://images.unsplash.com/photo-1527482797697-8795b05a13fe?w=600&h=300&fit=crop',
+  'Downed Branch': 'https://images.unsplash.com/photo-1508193638397-1c4234db14d8?w=600&h=300&fit=crop',
+  'Power Line Hazard': 'https://images.unsplash.com/photo-1473341304170-971dccb5ac1e?w=600&h=300&fit=crop',
+  'Other': 'https://images.unsplash.com/photo-1517732306149-e8f829eb588a?w=600&h=300&fit=crop',
 };
 
 function computePriorityScore(report: Report, allReports: Report[]): number {
@@ -105,16 +124,56 @@ function getPriorityColor(label: string) {
 }
 
 /* ═══════════════════════════════════════════════════════════════════
-   Category Placeholders (when no photo is available)
+   Clustering
    ═══════════════════════════════════════════════════════════════════ */
-const CATEGORY_PLACEHOLDER: Record<string, { icon: string; bg: string; text: string }> = {
-  'Pothole': { icon: '🕳️', bg: '#fff3e0', text: '#e65100' },
-  'Street Light Out': { icon: '💡', bg: '#fffde7', text: '#f57f17' },
-  'Storm Damage': { icon: '🌧️', bg: '#e3f2fd', text: '#0d47a1' },
-  'Downed Branch': { icon: '🌳', bg: '#e8f5e9', text: '#2e7d32' },
-  'Power Line Hazard': { icon: '⚡', bg: '#fce4ec', text: '#c62828' },
-  'Other': { icon: '📋', bg: '#f5f5f5', text: '#616161' },
-};
+function clusterReports(data: Report[]): (Report | ClusterGroup)[] {
+  const clustered: (Report | ClusterGroup)[] = [];
+  const processed = new Set<string>();
+
+  const sortedData = [...data].sort((a, b) => (b.priority_score ?? 0) - (a.priority_score ?? 0));
+
+  for (const report of sortedData) {
+    if (processed.has(report.id)) continue;
+    if (!report.latitude || !report.longitude) {
+      clustered.push(report);
+      processed.add(report.id);
+      continue;
+    }
+
+    const category = report.categories?.name || 'Other';
+    const nearbyReports = [report];
+    processed.add(report.id);
+
+    for (const other of sortedData) {
+      if (processed.has(other.id) || !other.latitude || !other.longitude) continue;
+      if ((other.categories?.name || 'Other') !== category) continue;
+      if (haversineKm(report.latitude, report.longitude, other.latitude, other.longitude) < 0.3) {
+        nearbyReports.push(other);
+        processed.add(other.id);
+      }
+    }
+
+    if (nearbyReports.length > 1) {
+      const maxScore = Math.max(...nearbyReports.map((r) => r.priority_score ?? 0));
+      clustered.push({
+        id: `cluster_${report.id}`,
+        category,
+        address: report.address,
+        reports: nearbyReports,
+        maxScore,
+        expanded: false,
+      } as ClusterGroup);
+    } else {
+      clustered.push(report);
+    }
+  }
+
+  return clustered;
+}
+
+function isClusterGroup(item: unknown): item is ClusterGroup {
+  return typeof item === 'object' && item !== null && 'reports' in item && Array.isArray((item as ClusterGroup).reports);
+}
 
 /* ═══════════════════════════════════════════════════════════════════
    Status Pipeline
@@ -158,7 +217,7 @@ function sortReports(data: Report[], key: SortKey, dir: SortDir): Report[] {
    Constants
    ═══════════════════════════════════════════════════════════════════ */
 const AUTO_REFRESH_MS = 5 * 60 * 1000;
-const PER_PAGE = 15;
+const ITEMS_PER_PAGE_OPTIONS = [10, 20, 50] as const;
 
 /* ═══════════════════════════════════════════════════════════════════
    Component
@@ -174,8 +233,8 @@ const ReportsPage: React.FC = () => {
   const [sortKey, setSortKey] = useState<SortKey>('priority');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(15);
   const [userUtilityCompany, setUserUtilityCompany] = useState<string | null>(null);
-  const [dispatchEnabled, setDispatchEnabled] = useState(false);
   const [dispatchLoading, setDispatchLoading] = useState(false);
   const [dispatchResult, setDispatchResult] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -184,6 +243,9 @@ const ReportsPage: React.FC = () => {
     todayCount: 0, yesterdayCount: 0, weeklyCount: 0, totalCount: 0,
     byStatus: {}, categoryBreakdown: [],
   });
+  const [expandedClusters, setExpandedClusters] = useState<Set<string>>(new Set());
+  const [uploadingReportId, setUploadingReportId] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const autoRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -214,8 +276,11 @@ const ReportsPage: React.FC = () => {
   /* ── Sort ── */
   const sorted = useMemo(() => sortReports(filtered, sortKey, sortDir), [filtered, sortKey, sortDir]);
 
-  const totalPages = Math.ceil(sorted.length / PER_PAGE);
-  const page = sorted.slice((currentPage - 1) * PER_PAGE, currentPage * PER_PAGE);
+  /* ── Cluster ── */
+  const clustered = useMemo(() => clusterReports(sorted), [sorted]);
+
+  const totalPages = Math.ceil(clustered.length / itemsPerPage);
+  const page = clustered.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
   /* ── Analytics ── */
   const calcAnalytics = (data: Report[]) => {
@@ -273,43 +338,94 @@ const ReportsPage: React.FC = () => {
   }, []);
 
   /* ── Actions ── */
-  const handleVerify = async (reportId: string) => {
+  const handleEscalateToVerification = async (reportId: string) => {
     try {
-      setDispatchLoading(true); setDispatchResult(null);
-      await supabase.from('reports').update({ status: 'verified' }).eq('id', reportId);
-      const { data: s } = await supabase.auth.getSession();
-      const uid = s?.session?.user?.id;
-      if (uid) {
-        await supabase.from('work_orders').insert({
-          report_id: reportId, errand_id: null, created_by: uid, status: 'open',
-          utility_company: userUtilityCompany,
-          estimated_resolution_date: new Date(Date.now() + 7 * 86400000).toISOString(),
-        });
-      }
-      if (dispatchEnabled && selectedReport) {
+      setDispatchLoading(true);
+      setDispatchResult(null);
+
+      await supabase.from('reports').update({ status: 'verification_in_progress' }).eq('id', reportId);
+
+      if (selectedReport) {
         const res = await dispatchJob({
-          jobType: 'verify', reportId,
+          jobType: 'verify',
+          reportId,
           pickupAddress: selectedReport.address || '',
-          pickupLat: selectedReport.latitude || 0, pickupLng: selectedReport.longitude || 0,
+          pickupLat: selectedReport.latitude || 0,
+          pickupLng: selectedReport.longitude || 0,
           dropoffAddress: selectedReport.address || '',
-          dropoffLat: selectedReport.latitude || 0, dropoffLng: selectedReport.longitude || 0,
+          dropoffLat: selectedReport.latitude || 0,
+          dropoffLng: selectedReport.longitude || 0,
           taskDescription: `Verify ${selectedReport.categories?.name || 'issue'} at ${selectedReport.address}`,
           payoutAmount: 7,
         });
         setDispatchResult(res.success
-          ? `Dispatched! Delivery ID: ${res.deliveryId}`
-          : `Work order saved. Dispatch failed: ${res.error}`);
+          ? `Gig worker dispatched! Delivery ID: ${res.deliveryId}`
+          : `Escalated to verification. Dispatch failed: ${res.error}`);
       }
+
       fetchReports();
-      if (!dispatchEnabled) setShowModal(false);
     } catch (e) { console.error(e); }
     finally { setDispatchLoading(false); }
+  };
+
+  const handleUploadProofAndVerify = async (reportId: string) => {
+    setUploadingReportId(reportId);
+    fileInputRef.current?.click();
+  };
+
+  const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!uploadingReportId || !e.target.files?.[0]) return;
+
+    try {
+      setDispatchLoading(true);
+      const file = e.target.files[0];
+      const fileName = `${Date.now()}-${file.name}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('reports')
+        .upload(`photos/${fileName}`, file);
+
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('reports')
+        .getPublicUrl(`photos/${fileName}`);
+
+      await supabase.from('reports').update({
+        status: 'verified',
+        photo_url: publicUrl,
+      }).eq('id', uploadingReportId);
+
+      const { data: s } = await supabase.auth.getSession();
+      const uid = s?.session?.user?.id;
+      if (uid) {
+        await supabase.from('work_orders').insert({
+          report_id: uploadingReportId,
+          errand_id: null,
+          created_by: uid,
+          status: 'open',
+          utility_company: userUtilityCompany,
+          estimated_resolution_date: new Date(Date.now() + 7 * 86400000).toISOString(),
+        });
+      }
+
+      setDispatchResult('Photo uploaded and report verified! Work order created.');
+      fetchReports();
+    } catch (e) {
+      console.error(e);
+      setDispatchResult('Failed to upload photo and verify.');
+    } finally {
+      setDispatchLoading(false);
+      setUploadingReportId(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   };
 
   const handleReject = async (id: string) => {
     try {
       await supabase.from('reports').update({ status: 'rejected' }).eq('id', id);
-      fetchReports(); setShowModal(false);
+      fetchReports();
+      setShowModal(false);
     } catch (e) { console.error(e); }
   };
 
@@ -346,6 +462,39 @@ const ReportsPage: React.FC = () => {
     setCurrentPage(1);
   };
 
+  const toggleClusterExpanded = (clusterId: string) => {
+    const newExpanded = new Set(expandedClusters);
+    if (newExpanded.has(clusterId)) {
+      newExpanded.delete(clusterId);
+    } else {
+      newExpanded.add(clusterId);
+    }
+    setExpandedClusters(newExpanded);
+  };
+
+  const getPageInfo = () => {
+    const start = (currentPage - 1) * itemsPerPage + 1;
+    const end = Math.min(currentPage * itemsPerPage, clustered.length);
+    return { start, end, total: filtered.length };
+  };
+
+  const getPageNumbers = () => {
+    const pages: (number | string)[] = [];
+    const maxPages = 7;
+    if (totalPages <= maxPages) {
+      for (let i = 1; i <= totalPages; i++) pages.push(i);
+    } else {
+      pages.push(1);
+      const start = Math.max(2, currentPage - 2);
+      const end = Math.min(totalPages - 1, currentPage + 2);
+      if (start > 2) pages.push('...');
+      for (let i = start; i <= end; i++) pages.push(i);
+      if (end < totalPages - 1) pages.push('...');
+      pages.push(totalPages);
+    }
+    return pages;
+  };
+
   /* ═══════════════════════════════════════════════════════════════
      RENDER
      ═══════════════════════════════════════════════════════════════ */
@@ -363,7 +512,7 @@ const ReportsPage: React.FC = () => {
                 <div
                   style={{
                     ...S.pipelineStep,
-                    borderBottom: `3px solid ${step.color}`,
+                    borderBottom: `3px solid ${step.color}` as const,
                     backgroundColor: statusFilter === step.key ? step.color + '18' : '#fff',
                     cursor: 'pointer',
                   }}
@@ -383,7 +532,7 @@ const ReportsPage: React.FC = () => {
             <div
               style={{
                 ...S.pipelineStep,
-                borderBottom: `3px solid ${REJECTED_STATUS.color}`,
+                borderBottom: `3px solid ${REJECTED_STATUS.color}` as const,
                 backgroundColor: statusFilter === 'rejected' ? REJECTED_STATUS.color + '18' : '#fff',
                 cursor: 'pointer',
               }}
@@ -475,7 +624,61 @@ const ReportsPage: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {page.map((r) => {
+              {page.map((item) => {
+                if (isClusterGroup(item)) {
+                  const expanded = expandedClusters.has(item.id);
+                  return (
+                    <React.Fragment key={item.id}>
+                      <tr style={{ ...S.tr, backgroundColor: '#f9f9f9', fontWeight: '600' }}>
+                        <td colSpan={7} style={{ ...S.td, cursor: 'pointer', padding: '12px' }}
+                          onClick={() => toggleClusterExpanded(item.id)}>
+                          <span style={{ marginRight: '8px' }}>{expanded ? '▼' : '▶'}</span>
+                          <span>📍 {item.category} cluster — {item.reports.length} reports near {trunc(item.address, 35)}</span>
+                        </td>
+                      </tr>
+                      {expanded && item.reports.map((r) => {
+                        const pc = getPriorityColor(r.priority_label || 'Low');
+                        return (
+                          <tr key={r.id} style={{ ...S.tr, backgroundColor: '#fafafa' }}
+                            onClick={() => { setSelectedReport(r); setShowModal(true); setDispatchResult(null); }}>
+                            <td style={S.td}>
+                              <span style={{
+                                display: 'inline-block', padding: '3px 10px', borderRadius: '12px', fontSize: '11px',
+                                fontWeight: '700', backgroundColor: pc.bg, color: pc.text, minWidth: '56px', textAlign: 'center' as const,
+                              }}>
+                                {r.priority_score}
+                              </span>
+                            </td>
+                            <td style={S.td}>{new Date(r.created_at).toLocaleDateString()}</td>
+                            <td style={{ ...S.td, fontWeight: '600' }}>{r.categories?.name || '—'}</td>
+                            <td style={{ ...S.td, color: '#555', fontSize: '12px', maxWidth: '240px' }}>
+                              {trunc(r.description, 55)}
+                            </td>
+                            <td style={S.td}>{trunc(r.address, 30)}</td>
+                            <td style={S.td}>
+                              <span style={{
+                                padding: '2px 8px', borderRadius: '10px', fontSize: '10px', fontWeight: '600',
+                                ...(r.source === '311_nyc'
+                                  ? { backgroundColor: '#e3f2fd', color: '#0d47a1' }
+                                  : { backgroundColor: '#e8f5e9', color: '#2e7d32' }),
+                              }}>
+                                {r.source === '311_nyc' ? 'NYC 311' : 'Canopy'}
+                              </span>
+                            </td>
+                            <td style={S.td}>
+                              <span style={{
+                                padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '600',
+                                ...getStatusColor(r.status),
+                              }}>{r.status.replace('_', ' ')}</span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </React.Fragment>
+                  );
+                }
+
+                const r = item as Report;
                 const pc = getPriorityColor(r.priority_label || 'Low');
                 return (
                   <tr key={r.id} style={S.tr}
@@ -483,7 +686,7 @@ const ReportsPage: React.FC = () => {
                     <td style={S.td}>
                       <span style={{
                         display: 'inline-block', padding: '3px 10px', borderRadius: '12px', fontSize: '11px',
-                        fontWeight: '700', backgroundColor: pc.bg, color: pc.text, minWidth: '56px', textAlign: 'center',
+                        fontWeight: '700', backgroundColor: pc.bg, color: pc.text, minWidth: '56px', textAlign: 'center' as const,
                       }}>
                         {r.priority_score}
                       </span>
@@ -516,12 +719,56 @@ const ReportsPage: React.FC = () => {
             </tbody>
           </table>
 
+          {/* ── Pagination Controls ── */}
+          <div style={S.paginationControls}>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <span style={{ fontSize: '13px', color: '#666' }}>Items per page:</span>
+              {[...ITEMS_PER_PAGE_OPTIONS, 'All'].map((option) => (
+                <button key={option}
+                  onClick={() => {
+                    if (option === 'All') {
+                      setItemsPerPage(filtered.length);
+                    } else {
+                      setItemsPerPage(option as number);
+                    }
+                    setCurrentPage(1);
+                  }}
+                  style={{
+                    ...S.pagNumBtn,
+                    ...(itemsPerPage === (option === 'All' ? filtered.length : option) ? S.pagNumBtnActive : {}),
+                  }}>
+                  {option}
+                </button>
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+              <button onClick={() => setCurrentPage(1)} disabled={currentPage === 1}
+                style={{ ...S.pagBtn, opacity: currentPage === 1 ? 0.4 : 1 }}>First</button>
+
+              {getPageNumbers().map((num, idx) => (
+                <button key={idx}
+                  onClick={() => typeof num === 'number' && setCurrentPage(num)}
+                  disabled={num === '...'}
+                  style={{
+                    ...S.pagBtn,
+                    ...(currentPage === num ? S.pagBtnActive : {}),
+                    opacity: num === '...' ? 0 : currentPage === num ? 1 : 0.6,
+                    cursor: num === '...' ? 'default' : 'pointer',
+                  }}>
+                  {num}
+                </button>
+              ))}
+
+              <button onClick={() => setCurrentPage(totalPages)} disabled={currentPage === totalPages}
+                style={{ ...S.pagBtn, opacity: currentPage === totalPages ? 0.4 : 1 }}>Last</button>
+            </div>
+          </div>
+
           <div style={S.pag}>
-            <button onClick={() => setCurrentPage(Math.max(1, currentPage - 1))} disabled={currentPage === 1}
-              style={{ ...S.pagBtn, opacity: currentPage === 1 ? 0.4 : 1 }}>Previous</button>
-            <span style={S.pagInfo}>Page {currentPage} of {totalPages} ({filtered.length} reports)</span>
-            <button onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))} disabled={currentPage === totalPages}
-              style={{ ...S.pagBtn, opacity: currentPage === totalPages ? 0.4 : 1 }}>Next</button>
+            <span style={S.pagInfo}>
+              Showing {getPageInfo().start}-{getPageInfo().end} of {getPageInfo().total} reports
+            </span>
           </div>
         </div>
       )}
@@ -608,19 +855,29 @@ const ReportsPage: React.FC = () => {
                   <img src={selectedReport.photo_url} alt="Report" style={{ width: '100%', maxHeight: '260px', objectFit: 'cover', borderRadius: '6px' }} />
                 </div>
               ) : (
-                <div style={{
-                  marginBottom: '16px', borderRadius: '8px', overflow: 'hidden',
-                  background: CATEGORY_PLACEHOLDER[selectedReport.categories?.name || '']?.bg || '#e2e3e5',
-                  padding: '28px 16px', textAlign: 'center',
-                }}>
-                  <div style={{ fontSize: '48px', marginBottom: '8px' }}>
-                    {CATEGORY_PLACEHOLDER[selectedReport.categories?.name || '']?.icon || '📋'}
-                  </div>
-                  <div style={{ fontSize: '16px', fontWeight: '700', color: CATEGORY_PLACEHOLDER[selectedReport.categories?.name || '']?.text || '#555' }}>
-                    {selectedReport.categories?.name || 'Report'}
-                  </div>
-                  <div style={{ fontSize: '12px', color: '#888', marginTop: '4px' }}>
-                    {selectedReport.source === '311_nyc' ? 'NYC 311 — no photo included' : 'No photo attached'}
+                <div style={{ marginBottom: '16px', position: 'relative' }}>
+                  <img
+                    src={CATEGORY_IMAGES[selectedReport.categories?.name || 'Other']}
+                    alt="Stock image"
+                    style={{
+                      width: '100%',
+                      maxHeight: '260px',
+                      objectFit: 'cover',
+                      borderRadius: '6px',
+                    }}
+                  />
+                  <div style={{
+                    position: 'absolute',
+                    top: '8px',
+                    right: '8px',
+                    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                    color: '#fff',
+                    padding: '4px 8px',
+                    borderRadius: '4px',
+                    fontSize: '11px',
+                    fontWeight: '600',
+                  }}>
+                    Stock image — {selectedReport.categories?.name || 'Other'}
                   </div>
                 </div>
               )}
@@ -647,17 +904,10 @@ const ReportsPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Dispatch Toggle */}
-            {selectedReport.status === 'submitted' && (
-              <div style={{ padding: '12px', backgroundColor: '#f0f7f0', borderRadius: '6px', border: '1px solid #c8e6c9', marginBottom: '14px' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', fontWeight: '600', color: '#1a472a', cursor: 'pointer' }}>
-                  <input type="checkbox" checked={dispatchEnabled} onChange={(e) => setDispatchEnabled(e.target.checked)}
-                    style={{ width: '18px', height: '18px' }} />
-                  Dispatch via DoorDash
-                </label>
-                <span style={{ display: 'block', fontSize: '12px', color: '#666', marginTop: '4px', marginLeft: '26px' }}>
-                  {dispatchEnabled ? 'A DoorDash Dasher will be assigned to verify this report' : 'Work order saved without dispatch (manual verification)'}
-                </span>
+            {/* Awaiting Verification Message */}
+            {selectedReport.status === 'verification_in_progress' && (
+              <div style={{ padding: '12px', backgroundColor: '#fff3cd', borderRadius: '6px', border: '1px solid #ffc107', marginBottom: '14px', color: '#856404' }}>
+                ⏳ Awaiting gig worker verification...
               </div>
             )}
 
@@ -667,12 +917,17 @@ const ReportsPage: React.FC = () => {
               </div>
             )}
 
+            {/* Action Buttons */}
             <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
               {selectedReport.status === 'submitted' && (
                 <>
-                  <button onClick={() => handleVerify(selectedReport.id)} disabled={dispatchLoading}
+                  <button onClick={() => handleEscalateToVerification(selectedReport.id)} disabled={dispatchLoading}
                     style={{ padding: '10px 16px', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '14px', fontWeight: '500', backgroundColor: '#388e3c', color: '#fff', opacity: dispatchLoading ? 0.6 : 1 }}>
-                    {dispatchLoading ? 'Processing...' : dispatchEnabled ? 'Verify & Dispatch' : 'Verify Report'}
+                    {dispatchLoading ? 'Processing...' : 'Escalate to Verification'}
+                  </button>
+                  <button onClick={() => handleUploadProofAndVerify(selectedReport.id)} disabled={dispatchLoading}
+                    style={{ padding: '10px 16px', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '14px', fontWeight: '500', backgroundColor: '#2196f3', color: '#fff', opacity: dispatchLoading ? 0.6 : 1 }}>
+                    {dispatchLoading ? 'Processing...' : 'Upload Proof & Verify'}
                   </button>
                   <button onClick={() => handleReject(selectedReport.id)}
                     style={{ padding: '10px 16px', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '14px', fontWeight: '500', backgroundColor: '#d32f2f', color: '#fff' }}>
@@ -680,10 +935,25 @@ const ReportsPage: React.FC = () => {
                   </button>
                 </>
               )}
+              {selectedReport.status === 'verification_in_progress' && (
+                <button onClick={() => handleReject(selectedReport.id)}
+                  style={{ padding: '10px 16px', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '14px', fontWeight: '500', backgroundColor: '#d32f2f', color: '#fff' }}>
+                  Reject
+                </button>
+              )}
             </div>
           </div>
         </div>
       )}
+
+      {/* Hidden File Input */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        style={{ display: 'none' }}
+        onChange={handleFileSelected}
+      />
     </div>
   );
 };
@@ -698,8 +968,8 @@ const Th: React.FC<{
   <th
     onClick={() => onClick(k)}
     style={{
-      padding: '10px 12px', textAlign: 'left', fontWeight: '600', color: cur === k ? '#1a472a' : '#444',
-      fontSize: '12px', cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap',
+      padding: '10px 12px', textAlign: 'left' as const, fontWeight: '600', color: cur === k ? '#1a472a' : '#444',
+      fontSize: '12px', cursor: 'pointer', userSelect: 'none' as const, whiteSpace: 'nowrap' as const,
       ...(wide ? { minWidth: '200px' } : {}),
       backgroundColor: cur === k ? '#eef5ee' : 'transparent',
     }}
@@ -727,18 +997,18 @@ function getStatusColor(status: string): { backgroundColor: string; color: strin
 /* ═══════════════════════════════════════════════════════════════════
    Styles
    ═══════════════════════════════════════════════════════════════════ */
-const S: Record<string, React.CSSProperties> = {
+const S: Record<string, CSSProperties> = {
   container: { padding: '20px 28px' },
   // Pipeline
   pipelineWrap: { marginBottom: '16px', backgroundColor: '#fff', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)', padding: '16px 20px' },
   pipelineRow: { display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' },
-  pipelineStep: { textAlign: 'center', padding: '10px 16px', borderRadius: '8px', minWidth: '90px', transition: 'background-color 0.15s' },
+  pipelineStep: { textAlign: 'center' as const, padding: '10px 16px', borderRadius: '8px', minWidth: '90px', transition: 'background-color 0.15s' },
   pipelineArrow: { fontSize: '18px', color: '#ccc', fontWeight: 'bold' },
   // Stats
   statsRow: { display: 'flex', gap: '12px', marginBottom: '12px' },
-  statBox: { flex: 1, backgroundColor: '#fff', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)', padding: '12px 16px', textAlign: 'center' },
+  statBox: { flex: 1, backgroundColor: '#fff', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)', padding: '12px 16px', textAlign: 'center' as const },
   statNum: { display: 'block', fontSize: '22px', fontWeight: 'bold', color: '#333' },
-  statLbl: { fontSize: '10px', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px' },
+  statLbl: { fontSize: '10px', color: '#888', textTransform: 'uppercase' as const, letterSpacing: '0.5px' },
   // Chips
   chipRow: { display: 'flex', gap: '6px', marginBottom: '14px', flexWrap: 'wrap' },
   catChip: { padding: '4px 12px', borderRadius: '14px', fontSize: '12px', fontWeight: '500', backgroundColor: '#f5f5f5', color: '#555', cursor: 'pointer', border: '1px solid #e0e0e0' },
@@ -750,26 +1020,30 @@ const S: Record<string, React.CSSProperties> = {
   srcChip: { padding: '4px 12px', border: '1px solid #ddd', borderRadius: '14px', backgroundColor: '#fff', cursor: 'pointer', fontSize: '12px', fontWeight: '500', color: '#666' },
   srcChipActive: { backgroundColor: '#1a472a', color: '#fff', borderColor: '#1a472a' },
   refreshBtn: { padding: '6px 14px', backgroundColor: '#2196f3', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', fontWeight: '500' },
-  updatedTxt: { fontSize: '11px', color: '#999', whiteSpace: 'nowrap' },
+  updatedTxt: { fontSize: '11px', color: '#999', whiteSpace: 'nowrap' as const },
   exportBtn: { padding: '6px 14px', backgroundColor: '#1a472a', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', fontWeight: '500' },
   // Table
-  tableWrap: { backgroundColor: '#fff', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)', overflow: 'hidden' },
-  table: { width: '100%', borderCollapse: 'collapse' },
+  tableWrap: { backgroundColor: '#fff', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)', overflow: 'hidden' as const },
+  table: { width: '100%', borderCollapse: 'collapse' as const },
   thr: { backgroundColor: '#f8f8f8', borderBottom: '2px solid #e0e0e0' },
   tr: { borderBottom: '1px solid #f0f0f0', cursor: 'pointer' },
   td: { padding: '9px 12px', fontSize: '13px', color: '#333' },
   // Pagination
-  pag: { display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '16px', padding: '12px' },
-  pagBtn: { padding: '6px 14px', backgroundColor: '#1a472a', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: '500' },
+  paginationControls: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px', borderTop: '1px solid #f0f0f0', flexWrap: 'wrap', gap: '12px' },
+  pag: { display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '16px', padding: '8px 12px' },
+  pagBtn: { padding: '6px 10px', backgroundColor: '#1a472a', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', fontWeight: '500', minWidth: '32px' },
+  pagBtnActive: { backgroundColor: '#0d2418', color: '#fff' },
+  pagNumBtn: { padding: '4px 8px', border: '1px solid #ddd', borderRadius: '4px', backgroundColor: '#fff', cursor: 'pointer', fontSize: '12px', fontWeight: '500', color: '#666' },
+  pagNumBtnActive: { backgroundColor: '#1a472a', color: '#fff', borderColor: '#1a472a' },
   pagInfo: { fontSize: '13px', color: '#666' },
   // Modal
-  overlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 },
-  modal: { backgroundColor: '#fff', borderRadius: '8px', padding: '28px', maxWidth: '720px', width: '92%', maxHeight: '88vh', overflowY: 'auto', position: 'relative' },
-  closeBtn: { position: 'absolute', top: '10px', right: '14px', backgroundColor: 'transparent', border: 'none', fontSize: '28px', cursor: 'pointer', color: '#666' },
-  secLabel: { margin: '0 0 6px', fontSize: '11px', fontWeight: '600', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px' },
+  overlay: { position: 'fixed' as const, top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 },
+  modal: { backgroundColor: '#fff', borderRadius: '8px', padding: '28px', maxWidth: '720px', width: '92%', maxHeight: '88vh', overflowY: 'auto' as const, position: 'relative' as const },
+  closeBtn: { position: 'absolute' as const, top: '10px', right: '14px', backgroundColor: 'transparent', border: 'none', fontSize: '28px', cursor: 'pointer', color: '#666' },
+  secLabel: { margin: '0 0 6px', fontSize: '11px', fontWeight: '600', color: '#888', textTransform: 'uppercase' as const, letterSpacing: '0.5px' },
   // Loading / empty
-  loading: { textAlign: 'center', fontSize: '16px', color: '#666', padding: '40px' },
-  empty: { textAlign: 'center', padding: '40px', backgroundColor: '#fff', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)', color: '#666' },
+  loading: { textAlign: 'center' as const, fontSize: '16px', color: '#666', padding: '40px' },
+  empty: { textAlign: 'center' as const, padding: '40px', backgroundColor: '#fff', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)', color: '#666' },
 };
 
 export default ReportsPage;
